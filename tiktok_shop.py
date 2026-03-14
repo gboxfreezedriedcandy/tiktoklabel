@@ -232,6 +232,21 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     print(f"Typed SKU '{sku}' into product filter.")
     await asyncio.sleep(0.5)
 
+    # Order Contents dropdown — find the combobox in the row labelled "Order Contents"
+    order_contents_combobox = page.locator(
+        ':is(.filter-item, .filter-row, .filter-form-item):has-text("Order Contents") [role="combobox"]'
+    )
+    try:
+        await order_contents_combobox.wait_for(state="visible", timeout=8_000)
+        await order_contents_combobox.click()
+        await asyncio.sleep(0.5)
+        single_item_option = page.locator('[role="option"]', has_text="Single item")
+        await single_item_option.first.wait_for(state="visible", timeout=8_000)
+        await single_item_option.first.click()
+        print("'Single item' selected from Order Contents dropdown.")
+    except Exception as e:
+        print(f"Warning: could not set Order Contents to 'Single item': {e}")
+
     # Apply button — identified by data-log_click_for="apply" in the drawer HTML
     apply_btn = page.locator('[data-log_click_for="apply"]')
     await apply_btn.wait_for(state="visible", timeout=10_000)
