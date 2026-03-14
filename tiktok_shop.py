@@ -438,10 +438,12 @@ async def _click_select_all_checkbox(page: Page) -> None:
             if _is_checked(cls, aria):
                 return True
             # Also accept: input.checked is truthy
-            inp_handle = await label.query_selector("input[type='checkbox']")
-            if inp_handle:
-                checked = await page.evaluate("el => el.checked", inp_handle)
-                return bool(checked)
+            inp_loc = label.locator("input[type='checkbox']").first
+            if await inp_loc.count() > 0:
+                inp_handle = await inp_loc.element_handle()
+                if inp_handle:
+                    checked = await page.evaluate("el => el.checked", inp_handle)
+                    return bool(checked)
         except Exception:
             pass
         return False
@@ -454,7 +456,8 @@ async def _click_select_all_checkbox(page: Page) -> None:
     lbl_handle = await label.element_handle()
     mask = label.locator(".core-checkbox-mask-wrapper").first
     mask_handle = await mask.element_handle() if await mask.count() > 0 else None
-    inp_handle = await label.query_selector("input[type='checkbox']")
+    inp_loc = label.locator("input[type='checkbox']").first
+    inp_handle = await inp_loc.element_handle() if await inp_loc.count() > 0 else None
 
     async def try_click_playwright(loc) -> bool:
         try:
