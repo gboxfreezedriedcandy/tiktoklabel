@@ -261,6 +261,20 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     await tiktok_shipping_option.click()
     print("'TikTok Shipping (Upgraded)' selected from Shipping Method dropdown.")
 
+    # Order combine/split dropdown — keyed on content_type="combine_split_comp"
+    combine_split_combobox = page.locator(
+        '[data-log_click_for="filter_select"][data-log_json*="combine_split_comp"] [role="combobox"]'
+    )
+    await combine_split_combobox.wait_for(state="visible", timeout=8_000)
+    await combine_split_combobox.click()
+    await asyncio.sleep(0.5)
+    original_option = page.locator(
+        '[data-log_click_for="filter_select_option"]', has_text="Original"
+    )
+    await original_option.wait_for(state="visible", timeout=8_000)
+    await original_option.click()
+    print("'Original' selected from Order combine/split dropdown.")
+
     # Apply button — identified by data-log_click_for="apply" in the drawer HTML
     apply_btn = page.locator('[data-log_click_for="apply"]')
     await apply_btn.wait_for(state="visible", timeout=10_000)
