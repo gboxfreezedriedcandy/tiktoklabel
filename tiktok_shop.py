@@ -207,25 +207,102 @@ async def _click_awaiting_shipment_option(page: Page) -> None:
     print("'Awaiting shipment' option selected.")
 
 
+PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
+
+
+async def _apply_product_filter(page: Page, sku: str) -> None:
+    """
+    Click the Filter button, type the SKU into the Product field, and apply.
+    """
+    # Click the Filter button (try icon button, then text label)
+    filter_strategies = [
+        page.get_by_role("button", name="Filter"),
+        page.locator("button", has_text="Filter").first,
+        page.locator('[data-e2e="filter-btn"]').first,
+        page.locator("text=Filter").first,
+    ]
+    for locator in filter_strategies:
+        try:
+            await locator.wait_for(state="visible", timeout=5_000)
+            await locator.click()
+            print("Filter panel opened.")
+            break
+        except Exception:
+            continue
+    else:
+        screenshot_path = Path("debug_filter_btn.png")
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        raise RuntimeError(
+            f"Could not find the Filter button. Screenshot saved to '{screenshot_path}'."
+        )
+
+    await asyncio.sleep(1)
+
+    # Type the SKU into the Product search input
+    product_input_strategies = [
+        page.get_by_placeholder("Search product"),
+        page.get_by_placeholder("Product"),
+        page.locator("input[placeholder*='roduct']").first,
+        page.locator("input[placeholder*='SKU']").first,
+        page.get_by_role("textbox", name="Product").first,
+    ]
+    for locator in product_input_strategies:
+        try:
+            await locator.wait_for(state="visible", timeout=5_000)
+            await locator.fill(sku)
+            print(f"Typed SKU '{sku}' into product filter.")
+            break
+        except Exception:
+            continue
+    else:
+        screenshot_path = Path("debug_product_input.png")
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        raise RuntimeError(
+            f"Could not find the Product input in the filter panel. "
+            f"Screenshot saved to '{screenshot_path}'."
+        )
+
+    await asyncio.sleep(1)
+
+    # Confirm / Apply the filter
+    apply_strategies = [
+        page.get_by_role("button", name="Confirm"),
+        page.get_by_role("button", name="Apply"),
+        page.locator("button", has_text="Confirm").first,
+        page.locator("button", has_text="Apply").first,
+    ]
+    for locator in apply_strategies:
+        try:
+            await locator.wait_for(state="visible", timeout=5_000)
+            await locator.click()
+            print("Filter applied.")
+            return
+        except Exception:
+            continue
+
+    screenshot_path = Path("debug_apply_btn.png")
+    await page.screenshot(path=str(screenshot_path), full_page=True)
+    raise RuntimeError(
+        f"Could not find the Confirm/Apply button. Screenshot saved to '{screenshot_path}'."
+    )
+
+
 async def navigate_to_awaiting_shipment(page: Page) -> None:
     """
-    Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
+    Navigate to Manage Orders and filter to 'Awaiting shipment' orders
+    for product SKU G-BOX-FD-STRAWBERRY-SHOTCAKE-M.
 
     Steps:
-      1. Go to the all-orders list page.
-      2. Click the 'To ship' status tab.
-      3. Open the 'Order status' dropdown and choose 'Awaiting shipment'.
+      1. Go to the orders page.
+      2. Click the Filter button and filter by product SKU.
     """
     print(f"Navigating to Manage Orders: {ORDERS_URL}")
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
-    await asyncio.sleep(4)  # wait for JS-rendered tabs to appear
+    await asyncio.sleep(4)  # wait for JS-rendered page
 
-    await _click_to_ship_tab(page)
-    await asyncio.sleep(2)  # SPA tab switch — no full navigation event
-
-    await _click_awaiting_shipment_option(page)
+    await _apply_product_filter(page, PRODUCT_SKU)
     await asyncio.sleep(2)  # wait for filtered results to load
-    print("Filter applied: Awaiting shipment")
+    print(f"Filter applied: product={PRODUCT_SKU}")
 
 
 async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
