@@ -4,7 +4,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright, BrowserContext, Page
 
 COOKIES_FILE = Path("cookies.json")
-TIKTOK_SHOP_URL = "https://seller.tiktok.com"
+TIKTOK_SHOP_URL = "https://seller-us.tiktok.com/account/login"
 
 
 async def save_cookies(context: BrowserContext) -> None:
