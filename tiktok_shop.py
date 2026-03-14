@@ -394,6 +394,37 @@ async def _apply_product_filter(
     print("Filter applied.")
 
 
+SELECT_ALL_CHECKBOX_SELECTORS = [
+    "label[data-tid='m4b_checkbox'][data-id='fulfillment.table.select_current_package']",
+    "th[data-log_click_for='select_all_items_in_page'] input[type='checkbox']",
+    "//label[@data-id='fulfillment.table.select_current_package']",
+    "(//label[@data-tid='m4b_checkbox'])[1]",
+]
+
+
+async def _click_select_all_checkbox(page: Page) -> None:
+    """
+    Click the 'select all' header checkbox to select all rows on the current page.
+    Tries multiple selectors derived from the live TikTok Shop table HTML.
+    """
+    for selector in SELECT_ALL_CHECKBOX_SELECTORS:
+        try:
+            locator = page.locator(selector).first
+            await locator.wait_for(state="visible", timeout=8_000)
+            await locator.click()
+            print("Select-all checkbox clicked.")
+            return
+        except Exception:
+            continue
+
+    screenshot_path = Path("debug_select_all.png")
+    await page.screenshot(path=str(screenshot_path), full_page=True)
+    raise RuntimeError(
+        f"Could not find the select-all checkbox after trying {len(SELECT_ALL_CHECKBOX_SELECTORS)} selectors. "
+        f"Screenshot saved to '{screenshot_path}'."
+    )
+
+
 async def navigate_to_awaiting_shipment(
     page: Page,
     sku: str,
@@ -408,6 +439,7 @@ async def navigate_to_awaiting_shipment(
     Steps:
       1. Go to the orders page.
       2. Click the Filter button and filter by product SKU.
+      3. Click the select-all checkbox to select all visible rows.
     """
     print(f"Navigating to Manage Orders: {ORDERS_URL}")
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
@@ -416,6 +448,8 @@ async def navigate_to_awaiting_shipment(
     await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
     await asyncio.sleep(2)  # wait for filtered results to load
     print(f"Filter applied: product={sku}")
+
+    await _click_select_all_checkbox(page)
 
 
 async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
