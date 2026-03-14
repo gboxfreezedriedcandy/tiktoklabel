@@ -541,6 +541,7 @@ async def navigate_to_awaiting_shipment(
 
     await _click_select_all_checkbox(page)
     await _click_arrange_shipment_button(page)
+    await _wait_for_shipment_page_and_select_all(page)
 
 
 ARRANGE_SHIPMENT_SELECTORS = [
@@ -569,6 +570,40 @@ async def _click_arrange_shipment_button(page: Page) -> None:
     await page.screenshot(path=str(screenshot_path), full_page=True)
     raise RuntimeError(
         "Could not find the 'Arrange shipment' button. "
+        f"Screenshot saved to '{screenshot_path}'."
+    )
+
+
+SHIPMENT_PAGE_SELECT_ALL_SELECTORS = [
+    "th[data-log_click_for='select_all_items_in_page'] label",
+    "th[data-log_click_for='select_all_items_in_page'] input[type='checkbox']",
+    "label[data-id='fulfillment.table.select_current_package']",
+]
+
+
+async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
+    """
+    After the 'Arrange shipment' button is clicked, wait for the new page to
+    finish loading, then click the select-all checkbox in the shipment table.
+    """
+    print("Waiting for shipment page to load...")
+    await page.wait_for_load_state("domcontentloaded")
+    await asyncio.sleep(3)  # allow JS to render the table
+
+    for selector in SHIPMENT_PAGE_SELECT_ALL_SELECTORS:
+        try:
+            locator = page.locator(selector).first
+            await locator.wait_for(state="visible", timeout=15_000)
+            await locator.click(force=True)
+            print("Shipment page select-all checkbox clicked.")
+            return
+        except Exception:
+            continue
+
+    screenshot_path = Path("debug_shipment_select_all.png")
+    await page.screenshot(path=str(screenshot_path), full_page=True)
+    raise RuntimeError(
+        "Could not find the select-all checkbox on the shipment page. "
         f"Screenshot saved to '{screenshot_path}'."
     )
 
