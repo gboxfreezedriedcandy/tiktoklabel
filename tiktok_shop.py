@@ -1,3 +1,4 @@
+import argparse
 import json
 import asyncio
 from pathlib import Path
@@ -210,7 +211,13 @@ async def _click_awaiting_shipment_option(page: Page) -> None:
 PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 
 
-async def _apply_product_filter(page: Page, sku: str) -> None:
+async def _apply_product_filter(
+    page: Page,
+    sku: str,
+    order_contents: str,
+    shipping_method: str,
+    combine_split: str,
+) -> None:
     """
     Click the Filter button, type the SKU into the Product field, and apply.
     Selectors are derived from the live TikTok Shop filter-drawer HTML.
@@ -239,13 +246,12 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     await order_contents_combobox.wait_for(state="visible", timeout=8_000)
     await order_contents_combobox.click()
     await asyncio.sleep(0.5)
-    # "Single item" option carries value="1" in the same content_type namespace
-    single_item_option = page.locator(
-        '[data-log_click_for="filter_select_option"][data-log_json*="order_count_type_comp"][data-log_json*=\'"value":"1"\']'
+    order_contents_option = page.locator(
+        '[data-log_click_for="filter_select_option"]', has_text=order_contents
     )
-    await single_item_option.wait_for(state="visible", timeout=8_000)
-    await single_item_option.click()
-    print("'Single item' selected from Order Contents dropdown.")
+    await order_contents_option.wait_for(state="visible", timeout=8_000)
+    await order_contents_option.click()
+    print(f"'{order_contents}' selected from Order Contents dropdown.")
 
     # Shipping Method dropdown — keyed on content_type="fulfillment_type_v2_comp_us"
     shipping_combobox = page.locator(
@@ -254,12 +260,12 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     await shipping_combobox.wait_for(state="visible", timeout=8_000)
     await shipping_combobox.click()
     await asyncio.sleep(0.5)
-    tiktok_shipping_option = page.locator(
-        '[data-log_click_for="filter_select_option"]', has_text="TikTok Shipping (Upgraded)"
+    shipping_option = page.locator(
+        '[data-log_click_for="filter_select_option"]', has_text=shipping_method
     )
-    await tiktok_shipping_option.wait_for(state="visible", timeout=8_000)
-    await tiktok_shipping_option.click()
-    print("'TikTok Shipping (Upgraded)' selected from Shipping Method dropdown.")
+    await shipping_option.wait_for(state="visible", timeout=8_000)
+    await shipping_option.click()
+    print(f"'{shipping_method}' selected from Shipping Method dropdown.")
 
     # Order combine/split dropdown — keyed on content_type="combine_split_comp"
     combine_split_combobox = page.locator(
@@ -268,12 +274,12 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     await combine_split_combobox.wait_for(state="visible", timeout=8_000)
     await combine_split_combobox.click()
     await asyncio.sleep(0.5)
-    original_option = page.locator(
-        '[data-log_click_for="filter_select_option"]', has_text="Original"
+    combine_split_option = page.locator(
+        '[data-log_click_for="filter_select_option"]', has_text=combine_split
     )
-    await original_option.wait_for(state="visible", timeout=8_000)
-    await original_option.click()
-    print("'Original' selected from Order combine/split dropdown.")
+    await combine_split_option.wait_for(state="visible", timeout=8_000)
+    await combine_split_option.click()
+    print(f"'{combine_split}' selected from Order combine/split dropdown.")
 
     # Apply button — identified by data-log_click_for="apply" in the drawer HTML
     apply_btn = page.locator('[data-log_click_for="apply"]')
@@ -282,10 +288,16 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     print("Filter applied.")
 
 
-async def navigate_to_awaiting_shipment(page: Page) -> None:
+async def navigate_to_awaiting_shipment(
+    page: Page,
+    sku: str,
+    order_contents: str,
+    shipping_method: str,
+    combine_split: str,
+) -> None:
     """
     Navigate to Manage Orders and filter to 'Awaiting shipment' orders
-    for product SKU G-BOX-FD-STRAWBERRY-SHOTCAKE-M.
+    for the given product SKU and filter values.
 
     Steps:
       1. Go to the orders page.
@@ -295,9 +307,9 @@ async def navigate_to_awaiting_shipment(page: Page) -> None:
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
     await asyncio.sleep(4)  # wait for JS-rendered page
 
-    await _apply_product_filter(page, PRODUCT_SKU)
+    await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
     await asyncio.sleep(2)  # wait for filtered results to load
-    print(f"Filter applied: product={PRODUCT_SKU}")
+    print(f"Filter applied: product={sku}")
 
 
 async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
@@ -319,11 +331,23 @@ async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="TikTok Shop order automation")
+    parser.add_argument("--sku", default=PRODUCT_SKU, help="Product SKU to filter by")
+    parser.add_argument("--order-contents", default="Single item", dest="order_contents",
+                        help="Order Contents filter value (default: 'Single item')")
+    parser.add_argument("--shipping-method", default="TikTok Shipping (Upgraded)", dest="shipping_method",
+                        help="Shipping Method filter value (default: 'TikTok Shipping (Upgraded)')")
+    parser.add_argument("--combine-split", default="Original", dest="combine_split",
+                        help="Order combine/split filter value (default: 'Original')")
+    args = parser.parse_args()
+
     async with async_playwright() as playwright:
         browser, context, page = await get_authenticated_context(playwright)
         print(f"Current URL: {page.url}")
 
-        await navigate_to_awaiting_shipment(page)
+        await navigate_to_awaiting_shipment(
+            page, args.sku, args.order_contents, args.shipping_method, args.combine_split
+        )
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
 
