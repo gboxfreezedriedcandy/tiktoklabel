@@ -131,6 +131,82 @@ async def _try_cookies_exist() -> bool:
 ORDERS_URL = "https://seller-us.tiktok.com/order/list/all"
 
 
+async def _click_to_ship_tab(page: Page) -> None:
+    """
+    Click the 'To ship' status tab using several selector strategies in order.
+    Takes a debug screenshot if all strategies fail so the caller can inspect
+    what was actually rendered.
+    """
+    # Strategies tried in order (most-specific → least-specific)
+    strategies = [
+        # 1. data attribute (older TikTok Shop builds)
+        page.locator('[data-log_click_for="to_ship"]'),
+        # 2. ARIA tab role with visible label
+        page.get_by_role("tab", name="To ship"),
+        page.get_by_role("tab", name="To Ship"),
+        # 3. Plain text inside any clickable element
+        page.locator("text=To ship").first,
+        page.locator("text=To Ship").first,
+        # 4. TikTok Shop sometimes renders tabs as <li> items
+        page.locator("li", has_text="To ship").first,
+    ]
+
+    for locator in strategies:
+        try:
+            await locator.wait_for(state="visible", timeout=5_000)
+            await locator.click()
+            print("'To ship' tab clicked.")
+            return
+        except Exception:
+            continue
+
+    # All strategies failed — take a screenshot to help with debugging
+    screenshot_path = Path("debug_to_ship_tab.png")
+    await page.screenshot(path=str(screenshot_path), full_page=True)
+    raise RuntimeError(
+        f"Could not find the 'To ship' tab after trying {len(strategies)} selectors. "
+        f"A full-page screenshot was saved to '{screenshot_path}'. "
+        "Open it to inspect the actual page layout and update the selector."
+    )
+
+
+async def _click_awaiting_shipment_option(page: Page) -> None:
+    """
+    Open the Order-status combobox and select 'Awaiting shipment'.
+    Falls back to a plain text search when the data-attribute selector misses.
+    """
+    # Try the data-attribute wrapper first, then a plain combobox search
+    combobox_strategies = [
+        page.locator(
+            '[data-log_content_type="order_status_comp_for_to_ship_in_us"] [role="combobox"]'
+        ),
+        page.get_by_role("combobox").first,
+    ]
+    for locator in combobox_strategies:
+        try:
+            await locator.wait_for(state="visible", timeout=8_000)
+            await locator.click()
+            print("Order status combobox opened.")
+            break
+        except Exception:
+            continue
+    else:
+        screenshot_path = Path("debug_combobox.png")
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        raise RuntimeError(
+            f"Could not open the Order status combobox. "
+            f"Screenshot saved to '{screenshot_path}'."
+        )
+
+    await asyncio.sleep(1)  # wait for dropdown animation
+
+    # Pick 'Awaiting shipment' from the listbox
+    awaiting_option = page.locator('[role="option"]', has_text="Awaiting shipment")
+    await awaiting_option.first.wait_for(state="visible", timeout=10_000)
+    await awaiting_option.first.click()
+    print("'Awaiting shipment' option selected.")
+
+
 async def navigate_to_awaiting_shipment(page: Page) -> None:
     """
     Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
@@ -142,30 +218,12 @@ async def navigate_to_awaiting_shipment(page: Page) -> None:
     """
     print(f"Navigating to Manage Orders: {ORDERS_URL}")
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
-    await asyncio.sleep(3)  # wait for JS-rendered tabs to appear
+    await asyncio.sleep(4)  # wait for JS-rendered tabs to appear
 
-    # --- Step 1: click the 'To ship' tab ---
-    # The tab carries a data attribute: data-log_click_for="to_ship"
-    to_ship_tab = page.locator('[data-log_click_for="to_ship"]')
-    await to_ship_tab.wait_for(state="visible", timeout=20_000)
-    await to_ship_tab.click()
+    await _click_to_ship_tab(page)
     await asyncio.sleep(2)  # SPA tab switch — no full navigation event
 
-    # --- Step 2: open the Order status combobox ---
-    # The wrapper div has data-log_content_type="order_status_comp_for_to_ship_in_us"
-    # and the actual trigger is the role="combobox" inside it.
-    status_combobox = page.locator(
-        '[data-log_content_type="order_status_comp_for_to_ship_in_us"] [role="combobox"]'
-    )
-    await status_combobox.wait_for(state="visible", timeout=15_000)
-    await status_combobox.click()
-    await asyncio.sleep(1)  # wait for dropdown animation
-
-    # --- Step 3: select 'Awaiting shipment' from the dropdown list ---
-    # The option popup appears as a listbox; pick the item by visible text.
-    awaiting_option = page.locator('[role="option"]', has_text="Awaiting shipment")
-    await awaiting_option.first.wait_for(state="visible", timeout=10_000)
-    await awaiting_option.first.click()
+    await _click_awaiting_shipment_option(page)
     await asyncio.sleep(2)  # wait for filtered results to load
     print("Filter applied: Awaiting shipment")
 
