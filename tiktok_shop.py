@@ -23,6 +23,41 @@ async def load_cookies(context: BrowserContext) -> bool:
     return True
 
 
+CAPTCHA_SELECTORS = [
+    "[class*='captcha']",
+    "[id*='captcha']",
+    "[class*='verify']",
+    "[id*='verify']",
+    "iframe[src*='captcha']",
+    "iframe[src*='recaptcha']",
+]
+
+
+async def wait_for_captcha_if_present(page: Page) -> None:
+    """If a CAPTCHA is detected, pause until the user solves it."""
+    for selector in CAPTCHA_SELECTORS:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                print("\n*** CAPTCHA detected! Please solve it in the browser window. ***")
+                print("Waiting for CAPTCHA to be resolved...")
+                # Poll until none of the CAPTCHA selectors are visible
+                while True:
+                    await asyncio.sleep(1)
+                    visible = False
+                    for sel in CAPTCHA_SELECTORS:
+                        el = await page.query_selector(sel)
+                        if el and await el.is_visible():
+                            visible = True
+                            break
+                    if not visible:
+                        print("CAPTCHA resolved. Continuing...")
+                        break
+                return
+        except Exception:
+            continue
+
+
 async def login(playwright) -> None:
     """Open browser for manual login, then save session cookies."""
     browser = await playwright.chromium.launch(headless=False)
@@ -31,15 +66,19 @@ async def login(playwright) -> None:
 
     print("Opening TikTok Shop Seller Center...")
     await page.goto(TIKTOK_SHOP_URL)
+    await wait_for_captcha_if_present(page)
 
     print("Please log in manually in the browser window.")
     print("Waiting for you to reach the seller dashboard...")
 
-    # Wait until the URL changes away from the login page
-    await page.wait_for_url(
-        lambda url: "login" not in url and "passport" not in url,
-        timeout=120_000,
-    )
+    # Wait until the URL changes away from the login page; no hard timeout so
+    # CAPTCHAs that appear mid-login don't cause a premature failure.
+    while True:
+        await asyncio.sleep(1)
+        await wait_for_captcha_if_present(page)
+        if "login" not in page.url and "passport" not in page.url:
+            break
+
     # Give the page a moment to fully settle after redirect
     await page.wait_for_load_state("networkidle")
 
