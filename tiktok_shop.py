@@ -128,7 +128,7 @@ async def _try_cookies_exist() -> bool:
     return COOKIES_FILE.exists()
 
 
-ORDERS_URL = "https://seller-us.tiktok.com/order/list/all"
+ORDERS_URL = "https://seller-us.tiktok.com/order"
 
 
 async def _click_to_ship_tab(page: Page) -> None:
