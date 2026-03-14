@@ -80,7 +80,8 @@ async def login(playwright) -> None:
             break
 
     # Give the page a moment to fully settle after redirect
-    await page.wait_for_load_state("networkidle")
+    await page.wait_for_load_state("domcontentloaded")
+    await asyncio.sleep(2)
 
     await save_cookies(context)
     print("Login complete. Cookies saved.")
@@ -104,8 +105,8 @@ async def get_authenticated_context(playwright) -> tuple[object, BrowserContext,
     page = await context.new_page()
 
     print("Resuming session with saved cookies...")
-    await page.goto(TIKTOK_SHOP_URL)
-    await page.wait_for_load_state("networkidle")
+    await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+    await asyncio.sleep(2)
 
     # Check whether cookies are still valid
     if "login" in page.url or "passport" in page.url:
@@ -117,8 +118,8 @@ async def get_authenticated_context(playwright) -> tuple[object, BrowserContext,
         context = await browser.new_context()
         await load_cookies(context)
         page = await context.new_page()
-        await page.goto(TIKTOK_SHOP_URL)
-        await page.wait_for_load_state("networkidle")
+        await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+        await asyncio.sleep(2)
 
     return browser, context, page
 
@@ -140,17 +141,15 @@ async def navigate_to_awaiting_shipment(page: Page) -> None:
       3. Open the 'Order status' dropdown and choose 'Awaiting shipment'.
     """
     print(f"Navigating to Manage Orders: {ORDERS_URL}")
-    await page.goto(ORDERS_URL)
-    await page.wait_for_load_state("networkidle")
-    await asyncio.sleep(2)
+    await page.goto(ORDERS_URL, wait_until="domcontentloaded")
+    await asyncio.sleep(3)  # wait for JS-rendered tabs to appear
 
     # --- Step 1: click the 'To ship' tab ---
     # The tab carries a data attribute: data-log_click_for="to_ship"
     to_ship_tab = page.locator('[data-log_click_for="to_ship"]')
-    await to_ship_tab.wait_for(state="visible", timeout=15_000)
+    await to_ship_tab.wait_for(state="visible", timeout=20_000)
     await to_ship_tab.click()
-    await asyncio.sleep(1)
-    await page.wait_for_load_state("networkidle")
+    await asyncio.sleep(2)  # SPA tab switch — no full navigation event
 
     # --- Step 2: open the Order status combobox ---
     # The wrapper div has data-log_content_type="order_status_comp_for_to_ship_in_us"
@@ -160,15 +159,14 @@ async def navigate_to_awaiting_shipment(page: Page) -> None:
     )
     await status_combobox.wait_for(state="visible", timeout=15_000)
     await status_combobox.click()
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1)  # wait for dropdown animation
 
     # --- Step 3: select 'Awaiting shipment' from the dropdown list ---
     # The option popup appears as a listbox; pick the item by visible text.
     awaiting_option = page.locator('[role="option"]', has_text="Awaiting shipment")
     await awaiting_option.first.wait_for(state="visible", timeout=10_000)
     await awaiting_option.first.click()
-    await asyncio.sleep(1)
-    await page.wait_for_load_state("networkidle")
+    await asyncio.sleep(2)  # wait for filtered results to load
     print("Filter applied: Awaiting shipment")
 
 
