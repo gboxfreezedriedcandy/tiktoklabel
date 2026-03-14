@@ -394,33 +394,120 @@ async def _apply_product_filter(
     print("Filter applied.")
 
 
-SELECT_ALL_CHECKBOX_SELECTORS = [
-    "label[data-tid='m4b_checkbox'][data-id='fulfillment.table.select_current_package']",
-    "th[data-log_click_for='select_all_items_in_page'] input[type='checkbox']",
-    "//label[@data-id='fulfillment.table.select_current_package']",
-    "(//label[@data-tid='m4b_checkbox'])[1]",
-]
+def _is_checked(cls: str, aria: str | None) -> bool:
+    return "checked" in cls.lower() or (aria or "").lower() == "true"
 
 
 async def _click_select_all_checkbox(page: Page) -> None:
     """
     Click the 'select all' header checkbox to select all rows on the current page.
-    Tries multiple selectors derived from the live TikTok Shop table HTML.
+
+    Strategy (mirrors the battle-tested Selenium approach in the archive):
+      1. Find the label via data-id / data-tid attributes.
+      2. Skip if already checked (class contains 'checked' or aria-checked=true).
+      3. Try several click strategies in order:
+           a) Playwright click with force=True on the label
+           b) JS element.click() on the label
+           c) Playwright click with force=True on the mask wrapper
+           d) JS click on the mask wrapper
+           e) JS click on the bare <input>
+           f) Dispatch a synthetic MouseEvent on the label
+      4. Verify the checkbox is now checked after each successful click.
     """
-    for selector in SELECT_ALL_CHECKBOX_SELECTORS:
+    label_selector = "label[data-tid='m4b_checkbox'][data-id='fulfillment.table.select_current_package']"
+    label = page.locator(label_selector).first
+    try:
+        await label.wait_for(state="visible", timeout=10_000)
+    except Exception:
+        # Fallback: first header checkbox
+        label = page.locator("th[data-log_click_for='select_all_items_in_page'] label").first
+        await label.wait_for(state="visible", timeout=8_000)
+
+    # Boost z-index so nothing intercepts clicks
+    try:
+        handle = await label.element_handle()
+        if handle:
+            await page.evaluate("el => { el.style.zIndex = '2147483647'; }", handle)
+    except Exception:
+        pass
+
+    async def is_now_checked() -> bool:
         try:
-            locator = page.locator(selector).first
-            await locator.wait_for(state="visible", timeout=8_000)
-            await locator.click()
-            print("Select-all checkbox clicked.")
-            return
+            cls = await label.get_attribute("class") or ""
+            aria = await label.get_attribute("aria-checked")
+            if _is_checked(cls, aria):
+                return True
+            # Also accept: input.checked is truthy
+            inp_handle = await label.query_selector("input[type='checkbox']")
+            if inp_handle:
+                checked = await page.evaluate("el => el.checked", inp_handle)
+                return bool(checked)
+        except Exception:
+            pass
+        return False
+
+    # Already checked — nothing to do
+    if await is_now_checked():
+        print("Select-all checkbox already checked.")
+        return
+
+    lbl_handle = await label.element_handle()
+    mask = label.locator(".core-checkbox-mask-wrapper").first
+    mask_handle = await mask.element_handle() if await mask.count() > 0 else None
+    inp_handle = await label.query_selector("input[type='checkbox']")
+
+    async def try_click_playwright(loc) -> bool:
+        try:
+            await loc.scroll_into_view_if_needed()
+            await loc.click(force=True)
+            return True
+        except Exception:
+            return False
+
+    async def try_js_click(handle) -> bool:
+        if not handle:
+            return False
+        try:
+            await page.evaluate("el => el.click()", handle)
+            return True
+        except Exception:
+            return False
+
+    async def try_dispatch_event(handle) -> bool:
+        if not handle:
+            return False
+        try:
+            await page.evaluate(
+                "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,view:window}))",
+                handle,
+            )
+            return True
+        except Exception:
+            return False
+
+    strategies = [
+        ("Playwright force-click label", lambda: try_click_playwright(label)),
+        ("JS click label", lambda: try_js_click(lbl_handle)),
+        ("Playwright force-click mask", lambda: try_click_playwright(mask)),
+        ("JS click mask", lambda: try_js_click(mask_handle)),
+        ("JS click input", lambda: try_js_click(inp_handle)),
+        ("MouseEvent dispatch on label", lambda: try_dispatch_event(lbl_handle)),
+    ]
+
+    for name, strategy in strategies:
+        try:
+            await strategy()
         except Exception:
             continue
+        await asyncio.sleep(0.4)
+        if await is_now_checked():
+            print(f"Select-all checkbox checked via: {name}")
+            return
 
     screenshot_path = Path("debug_select_all.png")
     await page.screenshot(path=str(screenshot_path), full_page=True)
     raise RuntimeError(
-        f"Could not find the select-all checkbox after trying {len(SELECT_ALL_CHECKBOX_SELECTORS)} selectors. "
+        "Could not check the select-all checkbox after trying all strategies. "
         f"Screenshot saved to '{screenshot_path}'."
     )
 
