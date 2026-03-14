@@ -222,9 +222,10 @@ async def _apply_product_filter(page: Page, sku: str) -> None:
     print("Filter panel opened.")
     await asyncio.sleep(1)
 
-    # Product input — exact placeholder from the drawer HTML
-    product_input = page.get_by_placeholder(
-        "Enter a product name/product ID/seller SKU/SKU ID"
+    # Product input — scoped to the wrapper whose prefix label is exactly "Product"
+    # (other inputs share the same placeholder pattern, so we key off the label)
+    product_input = page.locator(
+        '.core-input-inner-wrapper:has(.core-input-group-prefix:text-is("Product")) input'
     )
     await product_input.wait_for(state="visible", timeout=10_000)
     await product_input.fill(sku)
