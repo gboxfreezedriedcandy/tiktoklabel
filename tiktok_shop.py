@@ -210,6 +210,112 @@ async def _click_awaiting_shipment_option(page: Page) -> None:
 
 PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 
+# --- Combine Orders modal ---
+COMBINE_CONFIRM_BUTTON_SELECTORS = [
+    "button[data-id='fulfillment.combine_package.confirm_all_combination']",
+    "button[data-log_click_for='accept_all_combination']",
+    "//button[.//span[normalize-space()='Combine orders and continue']]",
+]
+
+
+async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
+    """
+    Return True only if the Combine Orders modal was actually present and acted upon.
+
+    Polls for the "Combine orders and continue" confirm button for up to `timeout`
+    seconds.  When found, scrolls to it and tries several click strategies
+    (normal click → JS click → Space key → MouseEvent dispatch).  Returns True
+    as soon as the button disappears after a click, meaning the modal was
+    successfully dismissed.  Returns the last value of `seen` (True if the
+    button was ever visible) if the timeout expires before the modal clears.
+    """
+    import time as _time
+
+    end = _time.time() + timeout
+    seen = False
+
+    while _time.time() < end:
+        # Try each selector until we find a visible button
+        btn = None
+        for selector in COMBINE_CONFIRM_BUTTON_SELECTORS:
+            try:
+                locator = page.locator(selector).first
+                await locator.wait_for(state="visible", timeout=1500)
+                btn = locator
+                break
+            except Exception:
+                continue
+
+        if btn is None:
+            await asyncio.sleep(0.2)
+            continue
+
+        seen = True
+        print("Combine Orders modal detected.")
+
+        try:
+            await btn.scroll_into_view_if_needed()
+        except Exception:
+            pass
+
+        # Strategy 1: normal Playwright click
+        clicked = False
+        try:
+            await btn.click()
+            clicked = True
+        except Exception:
+            pass
+
+        # Strategy 2: JS element.click()
+        if not clicked:
+            try:
+                handle = await btn.element_handle()
+                if handle:
+                    await page.evaluate("el => el.click()", handle)
+                    clicked = True
+            except Exception:
+                pass
+
+        # Strategy 3: Space key press
+        if not clicked:
+            try:
+                await btn.press("Space")
+                clicked = True
+            except Exception:
+                pass
+
+        # Strategy 4: synthetic MouseEvent dispatch
+        if not clicked:
+            try:
+                handle = await btn.element_handle()
+                if handle:
+                    await page.evaluate(
+                        "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}))",
+                        handle,
+                    )
+                    clicked = True
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.5)
+
+        # If the button is gone the modal was dismissed — success
+        still_visible = False
+        for selector in COMBINE_CONFIRM_BUTTON_SELECTORS:
+            try:
+                locator = page.locator(selector).first
+                await locator.wait_for(state="visible", timeout=1200)
+                still_visible = True
+                break
+            except Exception:
+                continue
+
+        if not still_visible:
+            print("Combine Orders modal dismissed.")
+            return True
+
+    return seen
+
 
 async def _apply_product_filter(
     page: Page,
