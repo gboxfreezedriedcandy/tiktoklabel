@@ -127,12 +127,78 @@ async def _try_cookies_exist() -> bool:
     return COOKIES_FILE.exists()
 
 
+ORDERS_URL = "https://seller-us.tiktok.com/order/list/all"
+
+
+async def navigate_to_awaiting_shipment(page: Page) -> None:
+    """
+    Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
+
+    Steps:
+      1. Go to the all-orders list page.
+      2. Click the 'To ship' status tab.
+      3. Open the 'Order status' dropdown and choose 'Awaiting shipment'.
+    """
+    print(f"Navigating to Manage Orders: {ORDERS_URL}")
+    await page.goto(ORDERS_URL)
+    await page.wait_for_load_state("networkidle")
+    await asyncio.sleep(2)
+
+    # --- Step 1: click the 'To ship' tab ---
+    # The tab carries a data attribute: data-log_click_for="to_ship"
+    to_ship_tab = page.locator('[data-log_click_for="to_ship"]')
+    await to_ship_tab.wait_for(state="visible", timeout=15_000)
+    await to_ship_tab.click()
+    await asyncio.sleep(1)
+    await page.wait_for_load_state("networkidle")
+
+    # --- Step 2: open the Order status combobox ---
+    # The wrapper div has data-log_content_type="order_status_comp_for_to_ship_in_us"
+    # and the actual trigger is the role="combobox" inside it.
+    status_combobox = page.locator(
+        '[data-log_content_type="order_status_comp_for_to_ship_in_us"] [role="combobox"]'
+    )
+    await status_combobox.wait_for(state="visible", timeout=15_000)
+    await status_combobox.click()
+    await asyncio.sleep(0.5)
+
+    # --- Step 3: select 'Awaiting shipment' from the dropdown list ---
+    # The option popup appears as a listbox; pick the item by visible text.
+    awaiting_option = page.locator('[role="option"]', has_text="Awaiting shipment")
+    await awaiting_option.first.wait_for(state="visible", timeout=10_000)
+    await awaiting_option.first.click()
+    await asyncio.sleep(1)
+    await page.wait_for_load_state("networkidle")
+    print("Filter applied: Awaiting shipment")
+
+
+async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
+    """
+    Return a list of order IDs currently visible on the filtered orders page.
+    Each order row carries data-log_order_status="101" and
+    data-log_order_sub_status="1" for 'Awaiting shipment'.
+    """
+    rows = await page.query_selector_all(
+        '[data-log_order_status="101"][data-log_order_sub_status="1"]'
+    )
+    order_ids: list[str] = []
+    for row in rows:
+        oid = await row.get_attribute("data-log_order_id")
+        if oid:
+            order_ids.append(oid)
+    print(f"Found {len(order_ids)} awaiting-shipment orders on this page.")
+    return order_ids
+
+
 async def main():
     async with async_playwright() as playwright:
         browser, context, page = await get_authenticated_context(playwright)
         print(f"Current URL: {page.url}")
-        print("Session ready. Add your label download logic here.")
-        # Keep the browser open so you can inspect the page
+
+        await navigate_to_awaiting_shipment(page)
+        order_ids = await get_awaiting_shipment_order_ids(page)
+        print("Order IDs:", order_ids)
+
         input("Press Enter to close the browser...")
         await browser.close()
 
