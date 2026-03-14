@@ -2,7 +2,8 @@ import argparse
 import json
 import asyncio
 from pathlib import Path
-from playwright.async_api import async_playwright, BrowserContext, Page
+from typing import Optional
+from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 
 COOKIES_FILE = Path("cookies.json")
 TIKTOK_SHOP_URL = "https://seller-us.tiktok.com/account/login"
@@ -585,25 +586,121 @@ async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
     """
     After the 'Arrange shipment' button is clicked, wait for the new page to
     finish loading, then click the select-all checkbox in the shipment table.
+
+    Uses the same robust multi-strategy approach as _click_select_all_checkbox
+    to handle TikTok's custom checkbox components that resist simple clicks.
     """
     print("Waiting for shipment page to load...")
+    # The arrange-shipment button navigates to a new URL; wait for that navigation
     await page.wait_for_load_state("domcontentloaded")
-    await asyncio.sleep(3)  # allow JS to render the table
+    await asyncio.sleep(4)  # allow JS to render the table
 
+    # Locate the select-all label using the same selectors, with fallbacks
+    label: Optional[Locator] = None
     for selector in SHIPMENT_PAGE_SELECT_ALL_SELECTORS:
         try:
-            locator = page.locator(selector).first
-            await locator.wait_for(state="visible", timeout=15_000)
-            await locator.click(force=True)
-            print("Shipment page select-all checkbox clicked.")
-            return
+            loc = page.locator(selector).first
+            await loc.wait_for(state="visible", timeout=10_000)
+            label = loc
+            print(f"Shipment select-all found via: {selector!r}")
+            break
         except Exception:
             continue
+
+    if label is None:
+        screenshot_path = Path("debug_shipment_select_all.png")
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        raise RuntimeError(
+            "Could not find the select-all checkbox on the shipment page. "
+            f"Screenshot saved to '{screenshot_path}'."
+        )
+
+    # Boost z-index so nothing intercepts clicks
+    try:
+        handle = await label.element_handle()
+        if handle:
+            await page.evaluate("el => { el.style.zIndex = '2147483647'; }", handle)
+    except Exception:
+        pass
+
+    async def is_now_checked() -> bool:
+        try:
+            cls = await label.get_attribute("class") or ""
+            aria = await label.get_attribute("aria-checked")
+            if _is_checked(cls, aria):
+                return True
+            inp_loc = label.locator("input[type='checkbox']").first
+            if await inp_loc.count() > 0:
+                inp_handle = await inp_loc.element_handle()
+                if inp_handle:
+                    checked = await page.evaluate("el => el.checked", inp_handle)
+                    return bool(checked)
+        except Exception:
+            pass
+        return False
+
+    if await is_now_checked():
+        print("Shipment select-all checkbox already checked.")
+        return
+
+    lbl_handle = await label.element_handle()
+    mask = label.locator(".core-checkbox-mask-wrapper").first
+    mask_handle = await mask.element_handle() if await mask.count() > 0 else None
+    inp_loc = label.locator("input[type='checkbox']").first
+    inp_handle = await inp_loc.element_handle() if await inp_loc.count() > 0 else None
+
+    async def try_click_playwright(loc) -> bool:
+        try:
+            await loc.scroll_into_view_if_needed()
+            await loc.click(force=True)
+            return True
+        except Exception:
+            return False
+
+    async def try_js_click(handle) -> bool:
+        if not handle:
+            return False
+        try:
+            await page.evaluate("el => el.click()", handle)
+            return True
+        except Exception:
+            return False
+
+    async def try_dispatch_event(handle) -> bool:
+        if not handle:
+            return False
+        try:
+            await page.evaluate(
+                "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,view:window}))",
+                handle,
+            )
+            return True
+        except Exception:
+            return False
+
+    strategies = [
+        ("Playwright force-click label", lambda: try_click_playwright(label)),
+        ("JS click label", lambda: try_js_click(lbl_handle)),
+        ("Playwright force-click mask", lambda: try_click_playwright(mask)),
+        ("JS click mask", lambda: try_js_click(mask_handle)),
+        ("JS click input", lambda: try_js_click(inp_handle)),
+        ("MouseEvent dispatch on label", lambda: try_dispatch_event(lbl_handle)),
+    ]
+
+    for name, strategy in strategies:
+        try:
+            await strategy()
+        except Exception:
+            continue
+        await asyncio.sleep(0.4)
+        if await is_now_checked():
+            print(f"Shipment select-all checkbox checked via: {name}")
+            return
 
     screenshot_path = Path("debug_shipment_select_all.png")
     await page.screenshot(path=str(screenshot_path), full_page=True)
     raise RuntimeError(
-        "Could not find the select-all checkbox on the shipment page. "
+        "Could not check the shipment select-all checkbox after trying all strategies. "
         f"Screenshot saved to '{screenshot_path}'."
     )
 
