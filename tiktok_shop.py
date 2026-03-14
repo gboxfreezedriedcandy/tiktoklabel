@@ -537,6 +537,37 @@ async def navigate_to_awaiting_shipment(
     print(f"Filter applied: product={sku}")
 
     await _click_select_all_checkbox(page)
+    await _click_arrange_shipment_button(page)
+
+
+ARRANGE_SHIPMENT_SELECTORS = [
+    "button[data-id='fulfillment.manage_order.batch_arrange_shipment']",
+    "button[data-log_click_for='arrange_shipment']",
+    "//button[.//span[contains(normalize-space(),'Arrange shipment')]]",
+]
+
+
+async def _click_arrange_shipment_button(page: Page) -> None:
+    """
+    Wait for the 'Arrange shipment' button to appear (it only shows after rows
+    are selected) then click it.
+    """
+    for selector in ARRANGE_SHIPMENT_SELECTORS:
+        try:
+            locator = page.locator(selector).first
+            await locator.wait_for(state="visible", timeout=10_000)
+            await locator.click()
+            print("'Arrange shipment' button clicked.")
+            return
+        except Exception:
+            continue
+
+    screenshot_path = Path("debug_arrange_shipment.png")
+    await page.screenshot(path=str(screenshot_path), full_page=True)
+    raise RuntimeError(
+        "Could not find the 'Arrange shipment' button. "
+        f"Screenshot saved to '{screenshot_path}'."
+    )
 
 
 async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
