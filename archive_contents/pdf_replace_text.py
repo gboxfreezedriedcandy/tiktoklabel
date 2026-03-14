@@ -1,0 +1,377 @@
+import PyPDF2
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+import io
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from reportlab.lib.pagesizes import letter
+import re
+
+def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements):
+    pdfmetrics.registerFont(TTFont('SimSun', 'simsun.ttf'))  # Replace with the path to your Chinese font file
+    """
+    Replace text in a PDF file based on a key-value list of text replacements.
+
+    Args:
+        input_pdf_path (str): Path to the input PDF file.
+        output_pdf_path (str): Path to save the modified PDF file.
+        replacements (dict): A dictionary of text replacements {old_text: new_text}.
+
+    Returns:
+        None
+    """
+    # Open the input PDF
+    with open(input_pdf_path, 'rb') as input_file:
+        pdf_reader = PyPDF2.PdfReader(input_file)
+        pdf_writer = PyPDF2.PdfWriter()
+
+        # Loop through each page in the PDF
+        previous_page = ""
+        count = 0
+        for page in pdf_reader.pages:
+            count = count + 1
+            # Extract the text from the page
+            text = page.extract_text()
+
+            if text:
+                text = text.replace("\n", "").upper()
+                text = previous_page + text
+                #print(text)
+                print("---------")
+                try:
+                    #print(text)
+                    found = re.search('QTY(.*)QTY', text)
+                    #print(found)
+                    if found:
+                        previous_page = ""
+                        start_x = 50
+                        #print(found.group(1))
+                        orders = found.group(1).split("G-BOX ")
+                        if orders and orders[0] == "":
+                            orders.pop(0)
+
+                        # Build translated lines first so we can anchor to bottom
+                        translated_lines = []
+                        for item in orders:
+                            for old_text, new_text in replacements.items():
+                                if old_text in item:
+                                    match = re.search(old_text + r'(\d+)', item)
+                                    if not match:
+                                        continue
+                                    order_qty = match.group(1)
+                                    order_qty_text = order_qty
+                                    if order_qty.isdigit() and int(order_qty) > 1:
+                                        order_qty_text = '(' + order_qty_text + ')'
+                                    translated_lines.append(order_qty_text + ' X ' + new_text)
+
+                        if translated_lines:
+                            # Use actual page size so overlay aligns with each page
+                            try:
+                                page_width = float(getattr(page.mediabox, 'width', page.mediabox.upper_right[0]))
+                                page_height = float(getattr(page.mediabox, 'height', page.mediabox.upper_right[1]))
+                            except Exception:
+                                page_width, page_height = letter  # fallback
+
+                            packet = io.BytesIO()
+                            can = canvas.Canvas(packet, pagesize=(page_width, page_height))
+                            can.setFont('SimSun', 22)
+
+                            # Anchor the entire block at bottom margin; draw upwards
+                            line_height = 20
+                            bottom_margin = 36
+                            start_y = bottom_margin + (len(translated_lines) - 1) * line_height
+                            for idx, translate in enumerate(translated_lines):
+                                y = start_y - idx * line_height
+                                can.drawString(start_x, y, translate)
+
+                            can.save()
+
+                            print(translated_lines[-1])
+                            print(str(count))
+                            packet.seek(0)
+                            new_pdf = PyPDF2.PdfReader(packet)
+                            page.merge_page(new_pdf.pages[0])
+                    else:
+                        if previous_page == "":
+                            previous_page = text
+
+
+
+
+                except AttributeError:
+                    # AAA, ZZZ not found in the original string
+                    found = ''  # apply your error handling
+                # Perform text replacements
+                for old_text, new_text in replacements.items():
+                    text = text.replace(old_text, new_text)
+                    #print(text)
+
+            # Add the modified page to the writer
+            pdf_writer.add_page(page)
+
+        # Write the modified content to the output PDF
+        with open(output_pdf_path, 'wb') as output_file:
+            pdf_writer.write(output_file)
+
+
+# Example usage
+replacements = {
+    "G-BOX-GIFT-BOX-V1":"礼盒",
+    "G-BOX-FD-CHOCOLATE-ECLAIR-M":"中巧克力雪糕(新品)",
+    "G-BOX-FD-CHOCOLATE-ECLAIR-L":"大巧克力雪糕(新品)",
+    "G-BOX-SOUR-WORM-GUMMY":"酸虫软糖",
+    "G-BOX-WORM-GUMMY":"水果虫软糖",
+    "G-BOX-CROCODILES-GUMMY":"鳄鱼软糖",
+    "G-BOX-FD-JELLO-SAMPLE-PACK":"果冻礼盒",
+    "G-BOX-FD-JELLO-WATERMELON-M": "中西瓜果冻",
+    "G-BOX-FD-JELLO-WATERMELON-L": "大西瓜果冻",
+    "CHERRY-L": "大樱桃果冻",
+    "CHERRY-M": "中樱桃果冻",
+    "ORANGE-L": "大橙子果冻",
+    "ORANGE-M": "中橙子果冻",
+    "LEMON-L-NM" : "大柠檬果冻",
+    "LEMON-M-NM" : "中柠檬果冻",
+    "G-BOX-FD-JELLO-LEMON-L": "大柠檬果冻",
+    "G-BOX-FD-JELLO-LEMON-M": "中柠檬果冻",
+    "G-BOX-FD-JELLO-LEMON-S": "小柠檬果冻",
+    "G-BOX-FD-JELLO-PEACH-L" : "大桃子果冻",
+    "G-BOX-FD-JELLO-PEACH-S" : "小桃子果冻",
+    "G-BOX-FD-JELLO-PEACH-M" : "中桃子果冻",
+    "LIME-L" : "大青柠檬果冻",
+    "LIME-M" : "中青柠檬果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-L" : "大草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-M" : "中草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-S" : "小草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-PINK-L" : "大粉色草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-PINK-M" : "中粉色草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-PINK-S" : "小粉色草莓果冻",
+    "G-BOX-FD-JELLO-BLUEBERRY-L" : "大蓝莓果冻",
+    "G-BOX-FD-JELLO-BLUEBERRY-M" : "中蓝莓果冻",
+    "G-BOX-FD-JELLO-BLUEBERRY-S" : "小蓝莓果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-L" : "大菠萝果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-M" : "中菠萝果冻",
+    "RANCH-CUCUMBER-LARGE" : "大沙拉黄瓜",
+    "G-BOX-PICKLES-SMALL" : "小酸黄瓜",
+    "G-BOX-PICKLES-MEDIUM" : "中酸黄瓜",
+    "G-BOX-PICKLES-LARGE" : "大酸黄瓜",
+    "G-BOX-CHAMOY-PICKLES-LARGE" : "大辣的酸黄瓜",
+    "G-BOX-CHAMOY-PICKLES-LARGE" : "大辣的酸黄瓜",
+    "G-BOX-CHAMOY-PICKLES-SMALL" : "小辣的酸黄瓜",
+    "CHAMOY-CUCUMBER-LARGE": "大辣的黄瓜",
+    "G-BOX-FRUIT-ROLL-UP-L-CHQT " : "大彩虹卷卷卷糖",
+    "G-BOX-FRUIT-ROLL-UP-M-CHQT " : "中彩虹卷卷卷糖",
+    "G-BOX-FRUIT-ROLL-UP-L" : "大彩虹卷卷卷糖",
+    "G-BOX-FRUIT-ROLL-UP-M" : "中彩虹卷卷卷糖",
+    "G-BOX-FD-LEMONCANDY-8OZ": "大柠檬糖",
+    "LEMONCANDY-4OZ": "中柠檬糖",
+    "G-BOX-FD-GUMMY-BEAR": "大熊软糖",
+    "G-BOX-FD-FROZEN-GUMMY-BEAR": "大冷冻熊软糖",
+    "G-BOX-FD-AIR-CRUNCH-BBT": "大扁扁糖",
+    "G-BOX-FD-AIR-CRUNCH": "大扁扁糖",
+    "G-BOX-SOUR-FRETTLE-SMALL":"小酸彩虹糖",
+    "FREEZE DRIEDFRETTLES SOUR FLAVORAIR-TIGHT SEALED IN ADELI CONTAINERDEFAULT":"小酸彩虹糖",
+    "G-BOX-SOUR-MEDIUM":"中酸彩虹糖",
+    "G-BOX-FD-FRETTLES-LARGE":"大原味彩虹糖",
+    "G-BOX-SOUR-FRETTLE-LARGE": "大酸彩虹糖",
+    "G-BOX-FD-FRETTLES-SMALL":"小原味彩虹糖",
+    "G-BOX-FD-FRETTLES-MEDIUM":"中原味彩虹糖",
+    "G-BOX-FD-WILDBERRY-SMALL": "小野梅彩虹糖",
+    "G-BOX-FD-MARSHMALLOWS-MINI":"大棉花糖",
+    "G-BOX-FD-MARSHMALLOWS-CAR-M":"（焦）中棉花焦糖",
+    "G-BOX-FD-MARSHMALLOWS-CAR-L":"（焦）大棉花焦糖",
+    "LARGE-FD-MARSHMALLOWS-CAR":"（焦）大棉花焦糖",
+    "G-BOX-LARGE-GUMMY-CLUSTER": "大红色点点糖",
+    "G-BOX-FD-ICECREAM-SANDWICH-3OZ":"中三明治雪糕",
+    "G-BOX-FD-ICECREAM-SANDWICH-7OZ":"大三明治雪糕",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-S":"小碎块草莓雪糕(碎块)",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-M":"中草莓雪糕",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-L":"大草莓雪糕",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M":"中香草方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L" : "大香草方块",
+    "G-BOX-FD-ICECREAMCUBESVANILLA-L" : "大香草方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M":"中巧克力方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L":"大巧克力方块",
+    "G-BOX-CHAMOY-FRETTLES-MEDIUM":"中辣彩虹糖",
+    "G-BOX-CHAMOY-FRETTLES-LARGE": "大辣彩虹糖",
+    "G-BOX-CHAMOY-MEDIUM":"中辣彩虹糖",
+    "G-BOX-CHAMOY-LARGE": "大辣彩虹糖",
+    "G-BOX-PEACH-RING" : "大原味桃圈圈糖",
+    "G-BOX-CHAMOY-PEACH-RING":"大辣味桃圈圈糖",
+    "G-BOX-FD-STRAWBERRY-GUMMY":"大草莓软糖",
+    "G-BOX-FD-WATERMELON-GUMMY":"大西瓜软糖",
+    "G-BOX-FD-HONEY-CANDY":"大棕色蜜蜂圆糖",
+    "G-BOX-SUBSCRIPTION-BOX-V1":"大礼盒",
+    "G-BOX-FD-FRETTLES-XLARGE":"特大原味彩虹糖",
+    "FREEZE DRIEDSKITTLES SMOOTHIEFLAVOR AIR-TIGHT SEALEDIN A DELI CONTAINERDEFAULT":"小粉红冰沙彩虹糖",
+    "G-BOX-FD-GUMMY-FROGS-3": "青蛙3只包装",
+    "G-BOX-FD-TAFFY-COTTON-CANDY": "粉太妃糖",
+    "G-BOX-FD-TAFFY-VANILLA":"香草太妃糖-白色",
+    "G-BOX-FD-TAFFY-WATERMELON": "西瓜太妃糖-粉红加绿色",
+    "G-BOX-FD-TAFFY-BANANA": "香蕉太妃糖-黄加粉红色",
+    "G-BOX-FD-TAFFY-PEPPERMINT": "薄荷太妃糖-白加粉红色",
+    "G-BOX-FD-TAFFY-GREEN-APPLE": "青苹果太妃糖-绿色",
+    "G-BOX-FD-TAFFY-SHAVED-ICE" : "刨冰太妃糖",
+    "G-BOX-FD-TAFFY-KIWI-STRAWBERRY" : "草莓太妃糖",
+    "G-BOX-FD-TAFFY-BLACKBERRY-CRUMBLE" : "莓子太妃糖",
+    "G-BOX-FD-CHOCO-CRUNCH-L":"大巧克力饼干糖",
+    "G-BOX-FD-CHOCO-CRUNCH-M":"小巧克力饼干糖",
+    "G-BOX-FD-FRETTLES-SOUR-XLARGE":"酸特大彩虹糖(酸)",
+    "G-BOX-SOUR-FRETTLE-MEDIUM":"中酸彩虹糖（酸）",
+    "G-BOX-FREESES-M" : "中花生雪糕",
+    "G-BOX-FREESES-L" : "大花生雪糕",
+    "G-BOX-CHAMOY-FRETTLES-XL-JAR" : "特大辣彩虹糖(辣)",
+    "G-BOX-FD-DUBAI-CHOCOLATE-M":"中迪拜巧克力",
+    "G-BOX-FD-JELLO-BB-LEMON-L":"大蓝绿混合果冻",
+    "G-BOX-FD-JELLO-BB-LEMON-M":"中蓝绿混合果冻",
+    "G-BOX-FD-DUBAI-CHOCOLATE-L":"大迪拜巧克力"
+}
+
+hakam_replacements = {
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-M":"中草莓雪糕",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-L":"大草莓雪糕",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M":"中香草方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L":"大香草方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M":"中巧克力方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L":"大巧克力方块",
+    "HAKAM-SMALL-ORIGINAL-FRETTLES":"小原味彩虹糖",
+    "HAKAM-MEDIUM-ORIGINAL-FRETTLES":"中原味彩虹糖",
+    "HAKAM-LARGE-ORIGINAL-FRETTLES":"大原味彩虹糖",
+    "G-BOX-SOUR-SMALL": "小酸彩虹糖",
+    "G-BOX-SOUR-MEDIUM": "中酸彩虹糖",
+    "G-BOX-SOUR-LARGE": "大酸彩虹糖",
+    "G-BOX-FD-JELLO-LEMON-L": "大柠檬果冻",
+    "G-BOX-FD-JELLO-LEMON-M": "中柠檬果冻",
+    "G-BOX-FD-JELLO-LEMON-S": "小柠檬果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-L" : "大菠萝果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-S" : "小菠萝果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-M" : "中菠萝果冻",
+    "G-BOX-FD-JELLO-CHERRY-L": "大樱桃果冻",
+    "G-BOX-FD-JELLO-CHERRY-S": "小樱桃果冻",
+    "G-BOX-FD-JELLO-CHERRY-M": "中樱桃果冻",
+    "G-BOX-FD-JELLO-ORANGE-L": "大橙子果冻",
+    "G-BOX-FD-JELLO-ORANGE-S": "小橙子果冻",
+    "G-BOX-FD-JELLO-ORANGE-M": "中橙子果冻",
+    "G-BOX-FD-JELLO-LIME-L" : "大青柠檬果冻",
+    "G-BOX-FD-JELLO-LIME-S" : "小青柠檬果冻",
+    "G-BOX-FD-JELLO-LIME-M" : "中青柠檬果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-L": "大草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-S": "小草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-M": "中草莓果冻",
+    "G-BOX-FD-JELLO-WATERMELON-S": "小西瓜果冻",
+    "G-BOX-FD-JELLO-WATERMELON-M": "中西瓜果冻",
+    "G-BOX-FD-JELLO-WATERMELON-L": "大西瓜果冻",
+    "G-BOX-FD-FRETTLES-XLARGE":"特大原味彩虹糖",
+    "G-BOX-SUBSCRIPTION-BOX-V1":"大礼盒",
+    "G-BOX-FD-STRAWBERRY-GUMMY":"大草莓软糖",
+    "G-BOX-FD-WATERMELON-GUMMY":"大西瓜软糖",
+    "G-BOX-FD-TAFFY-COTTON-CANDY": "粉太妃",
+    "G-BOX-FD-TAFFY-WATERMELON-CANDY": "西瓜味太妃糖-粉红加绿色",
+    "G-BOX-FD-TAFFY-VANILLA-CANDY":"香草太妃糖-白色",
+    "G-BOX-FD-HONEY-CANDY":"大棕色蜜蜂圆糖",
+    "G-BOX-FD-GUMMY-BEAR": "大熊软糖",
+    "G-BOX-FD-FROZEN-GUMMY-BEAR": "大冷冻熊软糖",
+    "G-BOX-FD-FRETTLES-SOUR-XLARGE":"酸特大彩虹糖(酸)",
+    "G-BOX-FD-AIR-CRUNCH-BBT": "大扁扁糖",
+    "G-BOX-FD-GUMMY-WORM":"水果虫软糖",
+    "G-BOX-FREESES-M" : "中花生雪糕",
+    "G-BOX-FREESES-L" : "大花生雪糕",
+    "G-BOX-FD-JELLO-BLUEBERRY-M":"中蓝莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-PINK-M":"中粉红草莓果冻",
+    "G-BOX-FD-DUBAI-CHOCOLATE-M":"中迪拜巧克力",
+    "G-BOX-FD-JELLO-BB-LEMON-L":"大蓝绿混合果冻",
+    "G-BOX-FD-JELLO-BB-LEMON-M":"中蓝绿混合果冻",
+    "G-BOX-FD-DUBAI-CHOCOLATE-L":"大迪拜巧克力"
+}
+
+gboxcandyshop_replacement = {
+    "G-BOX-FD-HONEY-CANDY":"大棕色蜜蜂圆糖",
+    "G-BOX-FD-JELLO-WATERMELON-S": "小西瓜果冻",
+    "G-BOX-FRUIT-ROLL-UP-L" : "大彩虹卷卷卷糖",
+    "G-BOX-FRUIT-ROLL-UP-M" : "中彩虹卷卷卷糖",
+    "G-BOX-FD-JELLO-WATERMELON-M": "中西瓜果冻",
+    "G-BOX-FD-JELLO-WATERMELON-L": "大西瓜果冻",
+    "G-BOX-FD-JELLO-CHERRY-L": "大樱桃果冻",
+    "G-BOX-FD-JELLO-CHERRY-M": "中樱桃果冻",
+    "G-BOX-FD-JELLO-ORANGE-L": "大橙子果冻",
+    "G-BOX-FD-JELLO-ORANGE-M": "中橙子果冻",
+    "G-BOX-FD-JELLO-PEACH-L" : "大桃子果冻",
+    "G-BOX-FD-JELLO-PEACH-M" : "中桃子果冻",
+    "G-BOX-FD-JELLO-LEMON-L" : "大柠檬果冻",
+    "G-BOX-FD-JELLO-LEMON-M" : "中柠檬果冻",
+    "G-BOX-FD-JELLO-LIME-L" : "大青柠檬果冻",
+    "G-BOX-FD-JELLO-LIME-M" : "中青柠檬果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-L" : "大草莓果冻",
+    "G-BOX-FD-JELLO-STRAWBERRY-M" : "中草莓果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-L" : "大菠萝果冻",
+    "G-BOX-FD-JELLO-PINEAPPLE-M" : "中菠萝果冻",
+    "RANCH-CUCUMBER-LARGE" : "大沙拉黄瓜",
+    "G-BOX-PICKLES-SMALL" : "小酸黄瓜",
+    "G-BOX-PICKLES-LARGE" : "大酸黄瓜",
+    "G-BOX-CHAMOY-PICKLES-LARGE" : "大辣的酸黄瓜",
+    "G-BOX-CHAMOY-PICKLES-SMALL" : "小辣的酸黄瓜",
+    "CHAMOY-CUCUMBER-LARGE": "大辣的黄瓜",
+    "FRUIT-ROLL-UP-L-CHQT" : "大彩虹卷卷卷糖",
+    "FRUIT-ROLL-UP-M-CHQT" : "小彩虹卷卷卷糖",
+    "LEMONCANDY-8OZ": "大柠檬糖",
+    "LEMONCANDY-4OZ": "中柠檬糖",
+    "G-BOX-FD-GUMMY-BEAR": "大熊软糖",
+    "G-BOX-FD-FROZEN-GUMMY-BEAR": "大冷冻熊软糖",
+    "G-BOX-FD-AIR-CRUNCH-BBT": "大扁扁糖",
+    "G-BOX-SOUR-SMALL":"小酸彩虹糖",
+    "G-BOX-SOUR-MEDIUM":"中酸彩虹糖",
+    "G-BOX-SOUR-LARGE": "大酸彩虹糖",
+    "G-BOX-FRETTLES-SMALL":"小原味彩虹糖",
+    "G-BOX-FRETTLES-MEDIUM":"中原味彩虹糖",
+    "G-BOX-FRETTLES-LARGE": "大原味彩虹糖",
+    "G-BOX-CRC-SMALL":"小原味彩虹糖",
+    "G-BOX-CRC-MEDIUM":"中原味彩虹糖",
+    "G-BOX-CRC-LARGE": "大原味彩虹糖",
+    "G-BOX-FD-WILDBERRY-SMALL": "小野梅彩虹糖",
+    "LARGE-FD-MARSHMALLOWS-MINI":"大棉花糖",
+    "SMALL-FD-MARSHMALLOWS-CAR":"（焦）小棉花焦糖",
+    "LARGE-FD-MARSHMALLOWS-CAR":"（焦）大棉花焦糖",
+    "G-BOX-LARGE-GUMMY-CLUSTER": "大红色点点糖",
+    "G-BOX-FD-ICECREAM-SANDWICH-3OZ":"小雪糕饼干",
+    "G-BOX-FD-ICECREAM-SANDWICH-7OZ":"大雪糕饼干",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-S":"小草莓雪糕雪条",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-M":"中草莓雪糕雪条",
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-L":"大草莓雪糕雪条",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M":"中香草雪糕方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L":"大香草雪糕方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M":"中巧克力雪糕方块",
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L":"大巧克力雪糕方块",
+    "G-BOX-CHAMOY-MEDIUM":"中辣彩虹糖",
+    "G-BOX-CHAMOY-LARGE": "大辣彩虹糖",
+    "G-BOX-PEACH-RING" : "大原味桃圈圈糖",
+    "G-BOX-CHAMOY-PEACH-RING":"大辣味桃圈圈糖",
+    "G-BOX-PEACH-RING-CHAMOY":"大辣味桃圈糖",
+    "G-BOX-FD-STRAWBERRY-GUMMY":"大草莓软糖",
+    "G-BOX-FD-WATERMELON-GUMMY":"大西瓜软糖",
+    "G-BOX-SUBSCRIPTION-BOX-V1":"大礼盒",
+    "FREEZE DRIEDFRETTLES IN JARCONTAINER 22OZ":"特大原味彩虹糖",
+    "G-BOX-FD-FRETTLES-XLARGE":"特大原味彩虹糖",
+    "G-BOX-FD-FRETTLES-SOUR-XLARGE":"酸特大彩虹糖酸",
+    "CRUNCHYRAINBOW CANDY FREEZEDRIED FRETTLES ORIGINALFLAVOR IN TUB JARCONTAINER SNACKBONBONDEFAULT":"特大彩虹糖",
+    "FREEZE DRIEDSKITTLES SMOOTHIEFLAVOR AIR-TIGHT SEALEDIN A DELI CONTAINERDEFAULT":"小粉红冰沙彩虹糖",
+    "G-BOX-FD-GUMMY-FROGS-3": "青蛙3只包装",
+    "G-BOX-FD-CHOCO-CRUNCH-L":"大巧克力饼干糖",
+    "G-BOX-FD-CHOCO-CRUNCH-M":"小巧克力饼干糖",
+    "G-BOX-FD-TAFFY-COTTON-CANDY": "粉太妃",
+    "G-BOX-FD-TAFFY-VANILLA":"香草太妃糖-白色",
+    "G-BOX-FD-TAFFY-WATERMELON": "西瓜太妃糖-粉红加绿色",
+    "G-BOX-FD-TAFFY-BANANA": "香蕉太妃糖-黄加粉红色",
+    "G-BOX-FD-TAFFY-PEPPERMINT": "薄荷太妃糖-白加粉红色",
+    "G-BOX-FD-TAFFY-GREEN-APPLE": "青苹果太妃糖-绿色",
+    "G-BOX-FD-TAFFY-SHAVED-ICE" : "刨冰太妃糖",
+    "G-BOX-FD-TAFFY-KIWI-STRAWBERRY" : "草莓太妃糖",
+    "G-BOX-FD-TAFFY-BLACKBERRY-CRUMBLE" : "莓子太妃糖",
+    "G-BOX-FREESES-M" : "中花生雪糕",
+    "G-BOX-FREESES-L" : "大花生雪糕",
+    "G-BOX-FD-DUBAI-CHOCOLATE-M":"中迪拜巧克力",
+    "G-BOX-FD-JELLO-BB-LEMON-L":"大蓝绿混合果冻",
+    "G-BOX-FD-JELLO-BB-LEMON-M":"中蓝绿混合果冻",
+    "G-BOX-FD-DUBAI-CHOCOLATE-L":"大迪拜巧克力"
+}
+
+replace_text_in_pdf("08-08_08-26-44_Shipping label+Packing slip.pdf", "output-8-08-2025-gbox-4.pdf", replacements)

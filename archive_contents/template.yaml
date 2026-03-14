@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  TikTokFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      FunctionName: TikTokShopAutomation
+      MemorySize: 1024
+      Timeout: 900
+      ImageConfig:
+        Command: ["main.lambda_handler"]
+      Environment:
+        Variables:
+          TT_USERNAME: gboxfreezedriedcandyprint@gmail.com
+          TT_PASSWORD: TikTokPrinter@123
+          TT_HEADLESS: '1'
+          TT_ARTIFACTS_DIR: /tmp/tiktok_artifacts
+          TT_TMP_DIR: /tmp
+      Policies:
+        - AWSLambdaBasicExecutionRole
+    Metadata:
+      BuildMethod: dockerfile
+      Dockerfile: Dockerfile.lambda
+      DockerContext: .
+Outputs:
+  FunctionArn:
+    Value: !GetAtt TikTokFunction.Arn

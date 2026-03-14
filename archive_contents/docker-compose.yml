@@ -1,0 +1,18 @@
+services:
+  tiktok-shop:
+    build: .
+    env_file:
+      - .env
+    environment:
+      TT_HEADLESS: "1"
+      CHROME_BINARY: /usr/bin/chromium
+      CHROMEDRIVER_BINARY: /usr/bin/chromedriver
+      GD_OAUTH_CLIENT_SECRETS: /app/artifacts/client_secret_880912325143-hv552glesorqc5tlb5b2jsubecehf4q0.apps.googleusercontent.com.json
+      GD_TOKEN_PATH: /app/artifacts/token.json
+    ports:
+      - "5900:5900"
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./downloads:/app/downloads
+    shm_size: 2gb
+    command: ["--weight", "0.65"]
