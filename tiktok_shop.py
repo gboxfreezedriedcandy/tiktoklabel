@@ -213,78 +213,29 @@ PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 async def _apply_product_filter(page: Page, sku: str) -> None:
     """
     Click the Filter button, type the SKU into the Product field, and apply.
+    Selectors are derived from the live TikTok Shop filter-drawer HTML.
     """
-    # Click the Filter button (try icon button, then text label)
-    filter_strategies = [
-        page.get_by_role("button", name="Filter"),
-        page.locator("button", has_text="Filter").first,
-        page.locator('[data-e2e="filter-btn"]').first,
-        page.locator("text=Filter").first,
-    ]
-    for locator in filter_strategies:
-        try:
-            await locator.wait_for(state="visible", timeout=5_000)
-            await locator.click()
-            print("Filter panel opened.")
-            break
-        except Exception:
-            continue
-    else:
-        screenshot_path = Path("debug_filter_btn.png")
-        await page.screenshot(path=str(screenshot_path), full_page=True)
-        raise RuntimeError(
-            f"Could not find the Filter button. Screenshot saved to '{screenshot_path}'."
-        )
-
+    # The Filter button shown in the page toolbar (not the drawer)
+    filter_btn = page.locator("button", has_text="Filter").first
+    await filter_btn.wait_for(state="visible", timeout=15_000)
+    await filter_btn.click()
+    print("Filter panel opened.")
     await asyncio.sleep(1)
 
-    # Type the SKU into the Product search input
-    product_input_strategies = [
-        page.get_by_placeholder("Search product"),
-        page.get_by_placeholder("Product"),
-        page.locator("input[placeholder*='roduct']").first,
-        page.locator("input[placeholder*='SKU']").first,
-        page.get_by_role("textbox", name="Product").first,
-    ]
-    for locator in product_input_strategies:
-        try:
-            await locator.wait_for(state="visible", timeout=5_000)
-            await locator.fill(sku)
-            print(f"Typed SKU '{sku}' into product filter.")
-            break
-        except Exception:
-            continue
-    else:
-        screenshot_path = Path("debug_product_input.png")
-        await page.screenshot(path=str(screenshot_path), full_page=True)
-        raise RuntimeError(
-            f"Could not find the Product input in the filter panel. "
-            f"Screenshot saved to '{screenshot_path}'."
-        )
-
-    await asyncio.sleep(1)
-
-    # Confirm / Apply the filter
-    apply_strategies = [
-        page.get_by_role("button", name="Confirm"),
-        page.get_by_role("button", name="Apply"),
-        page.locator("button", has_text="Confirm").first,
-        page.locator("button", has_text="Apply").first,
-    ]
-    for locator in apply_strategies:
-        try:
-            await locator.wait_for(state="visible", timeout=5_000)
-            await locator.click()
-            print("Filter applied.")
-            return
-        except Exception:
-            continue
-
-    screenshot_path = Path("debug_apply_btn.png")
-    await page.screenshot(path=str(screenshot_path), full_page=True)
-    raise RuntimeError(
-        f"Could not find the Confirm/Apply button. Screenshot saved to '{screenshot_path}'."
+    # Product input — exact placeholder from the drawer HTML
+    product_input = page.get_by_placeholder(
+        "Enter a product name/product ID/seller SKU/SKU ID"
     )
+    await product_input.wait_for(state="visible", timeout=10_000)
+    await product_input.fill(sku)
+    print(f"Typed SKU '{sku}' into product filter.")
+    await asyncio.sleep(0.5)
+
+    # Apply button — identified by data-log_click_for="apply" in the drawer HTML
+    apply_btn = page.locator('[data-log_click_for="apply"]')
+    await apply_btn.wait_for(state="visible", timeout=10_000)
+    await apply_btn.click()
+    print("Filter applied.")
 
 
 async def navigate_to_awaiting_shipment(page: Page) -> None:
