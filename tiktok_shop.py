@@ -2,7 +2,6 @@ import json
 import asyncio
 from pathlib import Path
 from playwright.async_api import async_playwright, BrowserContext, Page
-from playwright_stealth import stealth_async
 
 COOKIES_FILE = Path("cookies.json")
 TIKTOK_SHOP_URL = "https://seller.tiktok.com"
@@ -24,12 +23,11 @@ async def load_cookies(context: BrowserContext) -> bool:
     return True
 
 
-async def login(playwright) -> BrowserContext:
+async def login(playwright) -> None:
     """Open browser for manual login, then save session cookies."""
     browser = await playwright.chromium.launch(headless=False)
     context = await browser.new_context()
     page = await context.new_page()
-    await stealth_async(page)
 
     print("Opening TikTok Shop Seller Center...")
     await page.goto(TIKTOK_SHOP_URL)
@@ -47,7 +45,7 @@ async def login(playwright) -> BrowserContext:
 
     await save_cookies(context)
     print("Login complete. Cookies saved.")
-    return context
+    await browser.close()
 
 
 async def get_authenticated_context(playwright) -> tuple[object, BrowserContext, Page]:
@@ -55,48 +53,39 @@ async def get_authenticated_context(playwright) -> tuple[object, BrowserContext,
     Return (browser, context, page) with an authenticated session.
     Reuses saved cookies if available, otherwise triggers manual login.
     """
+    has_cookies = await _try_cookies_exist()
+
+    if not has_cookies:
+        print("No saved cookies found. Starting fresh login...")
+        await login(playwright)
+
     browser = await playwright.chromium.launch(headless=False)
     context = await browser.new_context()
+    await load_cookies(context)
     page = await context.new_page()
-    await stealth_async(page)
 
-    has_cookies = await load_cookies(context)
+    print("Resuming session with saved cookies...")
+    await page.goto(TIKTOK_SHOP_URL)
+    await page.wait_for_load_state("networkidle")
 
-    if has_cookies:
-        print("Resuming session with saved cookies...")
-        await page.goto(TIKTOK_SHOP_URL)
-        await page.wait_for_load_state("networkidle")
-
-        # Check whether cookies are still valid
-        if "login" in page.url or "passport" in page.url:
-            print("Saved cookies expired. Triggering fresh login...")
-            await browser.close()
-            async with async_playwright() as pw:
-                ctx = await login(pw)
-                # Re-open after login so caller gets a usable context
-                browser2 = await pw.chromium.launch(headless=False)
-                context2 = await browser2.new_context()
-                await load_cookies(context2)
-                page2 = await context2.new_page()
-                await stealth_async(page2)
-                await page2.goto(TIKTOK_SHOP_URL)
-                await page2.wait_for_load_state("networkidle")
-                return browser2, context2, page2
-    else:
-        print("No saved cookies found. Starting fresh login...")
+    # Check whether cookies are still valid
+    if "login" in page.url or "passport" in page.url:
+        print("Saved cookies expired. Triggering fresh login...")
         await browser.close()
-        async with async_playwright() as pw:
-            await login(pw)
-        # Re-launch and load the newly saved cookies
+        await login(playwright)
+
         browser = await playwright.chromium.launch(headless=False)
         context = await browser.new_context()
-        page = await context.new_page()
-        await stealth_async(page)
         await load_cookies(context)
+        page = await context.new_page()
         await page.goto(TIKTOK_SHOP_URL)
         await page.wait_for_load_state("networkidle")
 
     return browser, context, page
+
+
+async def _try_cookies_exist() -> bool:
+    return COOKIES_FILE.exists()
 
 
 async def main():
