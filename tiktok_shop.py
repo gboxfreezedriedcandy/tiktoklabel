@@ -611,7 +611,7 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         await inp.wait_for(state="visible", timeout=10_000)
         handle = await inp.element_handle()
         await page.evaluate(
-            """(el, val) => {
+            """([el, val]) => {
                 const nativeSetter = Object.getOwnPropertyDescriptor(
                     window.HTMLInputElement.prototype, 'value'
                 ).set;
