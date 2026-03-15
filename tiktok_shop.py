@@ -823,6 +823,9 @@ async def navigate_to_awaiting_shipment(
     await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
     print("Filtered rows visible.")
 
+    if mode == "mixed-orders":
+        await scan_order_skus(page)
+
     await _click_select_all_checkbox(page)
     if mode != "mixed-orders":
         await _click_bulk_select_all_if_present(page)
@@ -1095,7 +1098,7 @@ async def main():
     parser.add_argument("--weight", type=float, default=None, dest="weight",
                         help="Package weight in kg to set (e.g. 0.65)")
     parser.add_argument("--mode", default="single-order",
-                        choices=["single-order", "mixed-orders", "combine-orders", "scan-skus"],
+                        choices=["single-order", "mixed-orders", "combine-orders"],
                         help="Order processing mode (default: single-order)")
     args = parser.parse_args()
 
@@ -1103,13 +1106,7 @@ async def main():
         browser, context, page = await get_authenticated_context(playwright)
         print(f"Current URL: {page.url}")
 
-        if args.mode == "scan-skus":
-            print(f"Navigating to orders page for SKU scan...")
-            await page.goto(ORDERS_URL, wait_until="domcontentloaded")
-            await asyncio.sleep(4)
-            await page.wait_for_selector("table tbody tr", state="visible", timeout=30_000)
-            await scan_order_skus(page)
-        elif args.mode == "combine-orders":
+        if args.mode == "combine-orders":
             await combine_orders_mode(page)
         else:
             await navigate_to_awaiting_shipment(
