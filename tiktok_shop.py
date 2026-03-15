@@ -1029,7 +1029,7 @@ async def scan_order_skus(page: Page) -> None:
     skus: list[str] = []
     for i in range(count):
         row = rows.nth(i)
-        trigger = row.locator("span[data-log_click_for='order_id_link']").first
+        trigger = row.locator("[data-log_click_for='cell_product']").first
         try:
             await trigger.scroll_into_view_if_needed()
             await trigger.hover()
