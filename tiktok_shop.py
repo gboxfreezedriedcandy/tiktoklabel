@@ -938,6 +938,9 @@ async def main():
                         help="Order combine/split filter value (default: 'Original')")
     parser.add_argument("--weight", type=float, default=None, dest="weight",
                         help="Package weight in kg to set (e.g. 0.65)")
+    parser.add_argument("--mode", default="single-order",
+                        choices=["single-order", "mixed-orders", "combine-orders"],
+                        help="Order processing mode (default: single-order)")
     args = parser.parse_args()
 
     async with async_playwright() as playwright:
