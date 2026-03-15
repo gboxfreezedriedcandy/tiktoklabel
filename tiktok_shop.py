@@ -215,8 +215,7 @@ PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 COMBINE_CONFIRM_BUTTON_SELECTORS = [
     "button[data-id='fulfillment.combine_package.confirm_all_combination']",
     "button[data-log_click_for='accept_all_combination']",
-    "//button[.//span[contains(normalize-space(),'combinations and continue')]]",
-    "//button[.//span[contains(normalize-space(),'combination and continue')]]",
+    "//button[.//span[contains(normalize-space(),'ombine') and contains(normalize-space(),'and continue')]]",
 ]
 
 REFRESH_ORDERS_SELECTOR = "button[data-log_click_for='refresh_orders']"
