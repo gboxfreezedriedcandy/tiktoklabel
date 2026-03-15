@@ -811,10 +811,11 @@ async def navigate_to_awaiting_shipment(
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
     await asyncio.sleep(4)  # wait for JS-rendered page
 
+    await _set_page_size(page, 50)
+
     if mode == "mixed-orders":
         await _apply_shipping_method_filter(page, shipping_method)
         await asyncio.sleep(2)  # wait for filtered results to load
-        await _set_page_size(page, 50)
     else:
         await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
         await asyncio.sleep(2)  # wait for filtered results to load
