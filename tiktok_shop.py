@@ -522,13 +522,17 @@ async def _click_bulk_select_all_if_present(page: Page) -> None:
     button (data-log_click_for='bulk_select') when the total exceeds the current
     page.  Click it if it appears so that ALL orders across pages are selected.
     """
+    # Give TikTok a moment to render the bulk-select button after the checkbox change
+    await asyncio.sleep(2)
+
     selector = "button[data-log_click_for='bulk_select'][data-id='fulfillment.table.select_all_package']"
     try:
         btn = page.locator(selector).first
-        await btn.wait_for(state="visible", timeout=3_000)
+        await btn.wait_for(state="visible", timeout=5_000)
         total = await btn.get_attribute("data-log_total_cnt") or "?"
-        await btn.click()
+        await btn.click(force=True)
         print(f"Clicked 'Select all {total} orders' bulk-select button.")
+        await asyncio.sleep(1)  # wait for selection to register
     except Exception:
         print("No bulk-select-all button found; current page selection is sufficient.")
 
