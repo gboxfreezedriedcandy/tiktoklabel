@@ -337,8 +337,13 @@ async def _set_page_size(page: Page, size: int) -> None:
     combobox = page.locator('.core-pagination-option [role="combobox"]')
     await combobox.wait_for(state="visible", timeout=10_000)
     await combobox.click()
-    await asyncio.sleep(0.5)
-    option = page.locator('[role="option"]', has_text=f"{size}/Page")
+    await asyncio.sleep(1)
+    # Resolve popup container from aria-controls, then find the option by text.
+    popup_id = await combobox.get_attribute("aria-controls")
+    if popup_id:
+        option = page.locator(f"#{popup_id}").get_by_text(f"{size}/Page", exact=True)
+    else:
+        option = page.get_by_text(f"{size}/Page", exact=True).last
     await option.wait_for(state="visible", timeout=8_000)
     await option.click()
     print(f"Page size set to {size}.")
