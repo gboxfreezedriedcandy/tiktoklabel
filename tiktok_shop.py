@@ -336,6 +336,16 @@ async def _set_page_size(page: Page, size: int) -> None:
     """Change the pagination page-size dropdown to the given value (e.g. 50)."""
     combobox = page.locator('.core-pagination-option [role="combobox"]')
     await combobox.wait_for(state="visible", timeout=10_000)
+
+    # Grab a handle to the first existing row so we can detect when the table
+    # unmounts and re-mounts with the new page size.
+    first_row = page.locator("table tbody tr").first
+    old_row_handle = None
+    try:
+        old_row_handle = await first_row.element_handle(timeout=3_000)
+    except Exception:
+        pass  # no rows yet — nothing to wait for detachment on
+
     await combobox.click()
     await asyncio.sleep(1)
     # Resolve popup container from aria-controls, then find the option by text.
@@ -346,9 +356,20 @@ async def _set_page_size(page: Page, size: int) -> None:
         option = page.get_by_text(f"{size}/Page", exact=True).last
     await option.wait_for(state="visible", timeout=8_000)
     await option.click()
-    print(f"Page size set to {size}. Waiting for orders to reload...")
-    await page.wait_for_load_state("networkidle", timeout=20_000)
-    print("Orders reloaded.")
+    print(f"Page size set to {size}. Waiting for table to refresh...")
+
+    # Wait for the old row to detach (table teardown), then for new rows to appear.
+    if old_row_handle:
+        try:
+            await page.wait_for_function(
+                "el => !el.isConnected", arg=old_row_handle, timeout=10_000
+            )
+            print("Old rows detached — table is refreshing.")
+        except Exception:
+            pass  # may already be gone or same DOM reused
+
+    await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
+    print(f"Table reloaded with {size}/page.")
 
 
 async def _apply_shipping_method_filter(page: Page, shipping_method: str) -> None:
