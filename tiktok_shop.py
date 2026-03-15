@@ -2,7 +2,7 @@ import argparse
 import json
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 
 COOKIES_FILE = Path("cookies.json")
@@ -532,23 +532,59 @@ async def _click_select_all_checkbox(page: Page) -> None:
 
 async def _click_bulk_select_all_if_present(page: Page) -> None:
     """
-    After the header checkbox is checked, TikTok may show a 'Select all N orders'
+    After the header checkbox is checked, TikTok may show a 'Select all N packages'
     button (data-log_click_for='bulk_select') when the total exceeds the current
-    page.  Click it if it appears so that ALL orders across pages are selected.
+    page.  Click it if it appears so that ALL packages across pages are selected.
     """
     # Give TikTok a moment to render the bulk-select button after the checkbox change
     await asyncio.sleep(2)
 
-    selector = "button[data-log_click_for='bulk_select'][data-id='fulfillment.table.select_all_package']"
-    try:
-        btn = page.locator(selector).first
-        await btn.wait_for(state="visible", timeout=5_000)
-        total = await btn.get_attribute("data-log_total_cnt") or "?"
-        await btn.click(force=True)
-        print(f"Clicked 'Select all {total} orders' bulk-select button.")
-        await asyncio.sleep(1)  # wait for selection to register
-    except Exception:
+    selectors = [
+        "button[data-log_click_for='bulk_select'][data-id='fulfillment.table.select_all_package']",
+        "button[data-log_click_for='bulk_select']",
+        "//button[.//span[contains(normalize-space(),'Select all') and contains(normalize-space(),'package')]]",
+    ]
+
+    btn = None
+    for selector in selectors:
+        try:
+            is_xpath = selector.startswith("//")
+            loc = page.locator(f"xpath={selector}" if is_xpath else selector).first
+            await loc.wait_for(state="visible", timeout=3_000)
+            btn = loc
+            print(f"Bulk-select-all button found via: {selector!r}")
+            break
+        except Exception:
+            continue
+
+    if btn is None:
         print("No bulk-select-all button found; current page selection is sufficient.")
+        return
+
+    total = await btn.get_attribute("data-log_total_cnt") or "?"
+    handle = await btn.element_handle()
+
+    strategies: list[tuple[str, Any]] = [
+        ("direct click",       lambda: btn.click(timeout=5_000)),
+        ("force click",        lambda: btn.click(force=True, timeout=5_000)),
+        ("JS click",           lambda: page.evaluate("el => el.click()", handle)),
+        ("dispatch click",     lambda: page.evaluate(
+            "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}))", handle
+        )),
+    ]
+
+    for name, strategy in strategies:
+        try:
+            await strategy()
+            await asyncio.sleep(0.5)
+            print(f"Clicked 'Select all {total} packages' via: {name}")
+            await asyncio.sleep(1)
+            return
+        except Exception as exc:
+            print(f"Bulk-select strategy '{name}' failed: {exc}")
+            continue
+
+    print("Warning: could not click bulk-select-all button after all strategies.")
 
 
 async def navigate_to_awaiting_shipment(
