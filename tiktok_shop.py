@@ -1067,6 +1067,13 @@ async def scan_order_skus(page: Page) -> None:
             order_skus.append((sku, qty))
         skus.append(order_skus)
 
+        print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
+
+        # Dismiss the popover before clicking the weight edit button,
+        # since a multi-SKU popover can cover the edit icon.
+        await page.keyboard.press("Escape")
+        await asyncio.sleep(0.1)
+
         # Click the weight edit button to proceed/dismiss
         edit_btn = page.locator("svg.theme-arco-icon-edit").first
         await edit_btn.click()
