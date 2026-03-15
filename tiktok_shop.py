@@ -603,13 +603,24 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         print(f"Warning: could not click Edit weight button: {e}")
         return
 
-    # Wait for the drawer to appear and fill the input
+    # Wait for the drawer to appear and set value via native input setter
+    # (fill() alone won't trigger React's synthetic onChange on controlled inputs)
     input_selector = "input#packageWeight_input"
     try:
         inp = page.locator(input_selector).first
         await inp.wait_for(state="visible", timeout=10_000)
-        await inp.triple_click()
-        await inp.fill(str(weight))
+        handle = await inp.element_handle()
+        await page.evaluate(
+            """(el, val) => {
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value'
+                ).set;
+                nativeSetter.call(el, val);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            [handle, str(weight)],
+        )
         print(f"Weight set to {weight}.")
     except Exception as e:
         print(f"Warning: could not set weight value: {e}")
