@@ -588,6 +588,7 @@ async def navigate_to_awaiting_shipment(
         print("No combine orders modal appeared. Proceeding normally.")
 
     await _wait_for_shipment_page_and_select_all(page)
+    await _click_bulk_select_all_if_present(page)
 
 
 ARRANGE_SHIPMENT_SELECTORS = [
