@@ -1032,10 +1032,10 @@ async def scan_order_skus(page: Page) -> None:
         trigger = row.locator("[data-log_click_for='cell_product']").first
         try:
             await trigger.scroll_into_view_if_needed()
-            await trigger.hover()
+            await trigger.click()
         except Exception as e:
-            print(f"Row {i}: could not hover order-ID cell: {e}")
-            skus.append("(hover failed)")
+            print(f"Row {i}: could not click product cell: {e}")
+            skus.append("(click failed)")
             continue
 
         # Wait for the product popover
@@ -1045,8 +1045,6 @@ async def scan_order_skus(page: Page) -> None:
         except Exception:
             print(f"Row {i}: popover did not appear.")
             skus.append("(no popover)")
-            # dismiss by moving away
-            await page.mouse.move(0, 0)
             continue
 
         # Extract the "Seller SKU: …" text
@@ -1059,7 +1057,7 @@ async def scan_order_skus(page: Page) -> None:
         skus.append(sku)
 
         # Dismiss popover
-        await page.mouse.move(0, 0)
+        await page.keyboard.press("Escape")
         await asyncio.sleep(0.2)
 
     print("\n=== SKUs found ===")
