@@ -1013,6 +1013,58 @@ async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
     )
 
 
+async def scan_order_skus(page: Page) -> None:
+    """
+    For each row in the current orders table, hover over the order-ID cell to
+    trigger the product-info popover, extract the 'Seller SKU:' value, then
+    print all SKUs to the console.
+    """
+    rows = page.locator("table tbody tr")
+    count = await rows.count()
+    print(f"Found {count} rows. Scanning SKUs...")
+
+    skus: list[str] = []
+    for i in range(count):
+        row = rows.nth(i)
+        trigger = row.locator("span[data-log_click_for='order_id_link']").first
+        try:
+            await trigger.scroll_into_view_if_needed()
+            await trigger.hover()
+        except Exception as e:
+            print(f"Row {i}: could not hover order-ID cell: {e}")
+            skus.append("(hover failed)")
+            continue
+
+        # Wait for the product popover
+        popover = page.locator("[data-log_module_name='product_edit_popover']").first
+        try:
+            await popover.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            print(f"Row {i}: popover did not appear.")
+            skus.append("(no popover)")
+            # dismiss by moving away
+            await page.mouse.move(0, 0)
+            continue
+
+        # Extract the "Seller SKU: …" text
+        sku_div = popover.locator("div:has-text('Seller SKU:')").last
+        try:
+            raw = await sku_div.inner_text()
+            sku = raw.replace("Seller SKU:", "").strip()
+        except Exception:
+            sku = "(parse error)"
+        skus.append(sku)
+
+        # Dismiss popover
+        await page.mouse.move(0, 0)
+        await asyncio.sleep(0.2)
+
+    print("\n=== SKUs found ===")
+    for idx, sku in enumerate(skus, 1):
+        print(f"  {idx:>3}. {sku}")
+    print(f"Total: {len(skus)}")
+
+
 async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
     """
     Return a list of order IDs currently visible on the filtered orders page.
@@ -1043,7 +1095,7 @@ async def main():
     parser.add_argument("--weight", type=float, default=None, dest="weight",
                         help="Package weight in kg to set (e.g. 0.65)")
     parser.add_argument("--mode", default="single-order",
-                        choices=["single-order", "mixed-orders", "combine-orders"],
+                        choices=["single-order", "mixed-orders", "combine-orders", "scan-skus"],
                         help="Order processing mode (default: single-order)")
     args = parser.parse_args()
 
@@ -1051,7 +1103,13 @@ async def main():
         browser, context, page = await get_authenticated_context(playwright)
         print(f"Current URL: {page.url}")
 
-        if args.mode == "combine-orders":
+        if args.mode == "scan-skus":
+            print(f"Navigating to orders page for SKU scan...")
+            await page.goto(ORDERS_URL, wait_until="domcontentloaded")
+            await asyncio.sleep(4)
+            await page.wait_for_selector("table tbody tr", state="visible", timeout=30_000)
+            await scan_order_skus(page)
+        elif args.mode == "combine-orders":
             await combine_orders_mode(page)
         else:
             await navigate_to_awaiting_shipment(
