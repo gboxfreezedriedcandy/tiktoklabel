@@ -613,6 +613,7 @@ async def navigate_to_awaiting_shipment(
 
     await _click_select_all_checkbox(page)
     await _click_bulk_select_all_if_present(page)
+    await _click_refresh_orders_button(page)
     await _click_arrange_shipment_button(page)
 
     # If a "Combine orders" popup appears, accept it, wait for combining to
