@@ -346,8 +346,9 @@ async def _set_page_size(page: Page, size: int) -> None:
         option = page.get_by_text(f"{size}/Page", exact=True).last
     await option.wait_for(state="visible", timeout=8_000)
     await option.click()
-    print(f"Page size set to {size}.")
-    await asyncio.sleep(1)
+    print(f"Page size set to {size}. Waiting for orders to reload...")
+    await page.wait_for_load_state("networkidle", timeout=20_000)
+    print("Orders reloaded.")
 
 
 async def _apply_shipping_method_filter(page: Page, shipping_method: str) -> None:
@@ -793,17 +794,6 @@ async def navigate_to_awaiting_shipment(
         await _apply_shipping_method_filter(page, shipping_method)
         await asyncio.sleep(2)  # wait for filtered results to load
         await _set_page_size(page, 50)
-        print("Waiting for orders to populate after page size change...")
-        try:
-            await page.wait_for_selector(
-                "table tbody tr",
-                state="visible",
-                timeout=15_000,
-            )
-            print("Orders populated.")
-        except Exception:
-            print("Warning: could not confirm orders loaded; proceeding anyway.")
-        await asyncio.sleep(1)
     else:
         await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
         await asyncio.sleep(2)  # wait for filtered results to load
