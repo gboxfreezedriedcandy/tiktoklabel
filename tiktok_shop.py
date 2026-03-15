@@ -1061,9 +1061,9 @@ async def scan_order_skus(page: Page) -> None:
             except Exception:
                 sku = "(parse error)"
             try:
-                qty = await qty_el.get_attribute("value") or ""
+                qty = await qty_el.get_attribute("value") or "1"
             except Exception:
-                qty = ""
+                qty = "1"
             order_skus.append((sku, qty))
         skus.append(order_skus)
 
