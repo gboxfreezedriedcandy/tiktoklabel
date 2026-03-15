@@ -1057,7 +1057,7 @@ async def scan_order_skus(page: Page) -> None:
         skus.append(sku)
 
         # Click the weight edit button to proceed/dismiss
-        edit_btn = popover.locator("svg.theme-arco-icon-edit").first
+        edit_btn = page.locator("svg.theme-arco-icon-edit").first
         await edit_btn.click()
         await asyncio.sleep(0.2)
 
