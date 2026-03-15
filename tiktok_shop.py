@@ -790,11 +790,12 @@ async def navigate_to_awaiting_shipment(
     await asyncio.sleep(4)  # wait for JS-rendered page
 
     if mode == "mixed-orders":
-        await _set_page_size(page, 50)
         await _apply_shipping_method_filter(page, shipping_method)
+        await asyncio.sleep(2)  # wait for filtered results to load
+        await _set_page_size(page, 50)
     else:
         await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
-    await asyncio.sleep(2)  # wait for filtered results to load
+        await asyncio.sleep(2)  # wait for filtered results to load
 
     await _click_select_all_checkbox(page)
     if mode != "mixed-orders":
