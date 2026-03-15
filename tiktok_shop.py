@@ -694,6 +694,37 @@ async def _print_document(page: Page) -> None:
         print(f"Warning: could not click Confirm on print settings: {e}")
 
 
+async def combine_orders_mode(page: Page) -> None:
+    """
+    combine-orders mode: no filters, select all, arrange shipment,
+    handle combine popup if it appears, then wait for the next page.
+    """
+    print("combine-orders mode: navigating to orders page...")
+    await page.goto(ORDERS_URL, wait_until="domcontentloaded")
+    await asyncio.sleep(4)
+
+    await _click_select_all_checkbox(page)
+    await _click_bulk_select_all_if_present(page)
+    await _click_arrange_shipment_button(page)
+
+    combined = await handle_combine_orders_modal(page, timeout=15.0)
+    if combined:
+        print("Orders combined. Waiting for shipment page...")
+    else:
+        print("No combine modal. Waiting for shipment page...")
+
+    await page.wait_for_load_state("domcontentloaded")
+    try:
+        await page.wait_for_selector(
+            "table[data-table-component='true'] tbody tr",
+            state="visible",
+            timeout=30_000,
+        )
+        print("Shipment page loaded.")
+    except Exception:
+        print("Warning: could not confirm table rows; proceeding anyway.")
+
+
 async def navigate_to_awaiting_shipment(
     page: Page,
     sku: str,
@@ -947,10 +978,13 @@ async def main():
         browser, context, page = await get_authenticated_context(playwright)
         print(f"Current URL: {page.url}")
 
-        await navigate_to_awaiting_shipment(
-            page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
-            weight=args.weight,
-        )
+        if args.mode == "combine-orders":
+            await combine_orders_mode(page)
+        else:
+            await navigate_to_awaiting_shipment(
+                page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
+                weight=args.weight,
+            )
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
 
