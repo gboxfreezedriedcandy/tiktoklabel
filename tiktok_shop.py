@@ -1026,7 +1026,7 @@ async def scan_order_skus(page: Page) -> None:
     count = await rows.count()
     print(f"Found {count} rows. Scanning SKUs...")
 
-    skus: list[str] = []
+    skus: list[tuple[str, str]] = []
     for i in range(count):
         row = rows.nth(i)
         trigger = row.locator("[data-log_click_for='cell_product']").first
@@ -1035,7 +1035,7 @@ async def scan_order_skus(page: Page) -> None:
             await trigger.click()
         except Exception as e:
             print(f"Row {i}: could not click product cell: {e}")
-            skus.append("(click failed)")
+            skus.append(("(click failed)", ""))
             continue
 
         # Wait for the product popover
@@ -1044,7 +1044,7 @@ async def scan_order_skus(page: Page) -> None:
             await popover.wait_for(state="visible", timeout=5_000)
         except Exception:
             print(f"Row {i}: popover did not appear.")
-            skus.append("(no popover)")
+            skus.append(("(no popover)", ""))
             continue
 
         # Extract the "Seller SKU: …" text
@@ -1054,7 +1054,14 @@ async def scan_order_skus(page: Page) -> None:
             sku = raw.replace("Seller SKU:", "").strip()
         except Exception:
             sku = "(parse error)"
-        skus.append(sku)
+
+        # Extract quantity from the spinbutton input
+        qty_input = popover.locator("[data-tid='m4b_input_number']").first
+        try:
+            qty = await qty_input.get_attribute("value") or ""
+        except Exception:
+            qty = ""
+        skus.append((sku, qty))
 
         # Click the weight edit button to proceed/dismiss
         edit_btn = page.locator("svg.theme-arco-icon-edit").first
@@ -1062,8 +1069,8 @@ async def scan_order_skus(page: Page) -> None:
         await asyncio.sleep(0.2)
 
     print("\n=== SKUs found ===")
-    for idx, sku in enumerate(skus, 1):
-        print(f"  {idx:>3}. {sku}")
+    for idx, (sku, qty) in enumerate(skus, 1):
+        print(f"  {idx:>3}. {sku}  x{qty}")
     print(f"Total: {len(skus)}")
 
 
