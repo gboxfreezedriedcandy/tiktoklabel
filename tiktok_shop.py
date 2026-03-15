@@ -1069,15 +1069,17 @@ async def scan_order_skus(page: Page) -> None:
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
 
-        # Dismiss the popover before clicking the weight edit button,
-        # since a multi-SKU popover can cover the edit icon.
-        await page.keyboard.press("Escape")
-        await asyncio.sleep(0.1)
-
-        # Click the weight edit button to proceed/dismiss
-        edit_btn = page.locator("svg.theme-arco-icon-edit").first
+        # Click the weight edit button scoped to this row to avoid the product
+        # popover intercepting the click.
+        edit_btn = row.locator("svg.theme-arco-icon-edit").first
         await edit_btn.click()
-        await asyncio.sleep(0.2)
+
+        # Confirm the weight popover appeared.
+        weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
+        try:
+            await weight_popover.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            print(f"  Row {i + 1}: warning — weight popover did not appear after edit click.")
 
     print("\n=== SKUs found ===")
     for idx, order_skus in enumerate(skus, 1):
