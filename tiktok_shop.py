@@ -1069,10 +1069,9 @@ async def scan_order_skus(page: Page) -> None:
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
 
-        # Click the weight edit button scoped to this row to avoid the product
-        # popover intercepting the click.
-        edit_btn = row.locator("svg.theme-arco-icon-edit").first
-        await edit_btn.click()
+        # Click the weight edit icon (force=True bypasses the product popover overlay).
+        edit_btn = page.locator("svg.theme-arco-icon-edit").first
+        await edit_btn.click(force=True)
 
         # Confirm the weight popover appeared.
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
