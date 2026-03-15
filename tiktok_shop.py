@@ -633,6 +633,67 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         print(f"Warning: could not click Apply for weight edit: {e}")
 
 
+async def _print_document(page: Page) -> None:
+    """
+    Click 'Print document', open the edit drawer, ensure Shipping label and
+    Packing slip are checked, then confirm.
+    """
+    # 1. Click the Print document button
+    print_btn = page.locator("[data-id='fulfillment.create_shipping_label.print_document']").first
+    try:
+        await print_btn.wait_for(state="visible", timeout=15_000)
+        await print_btn.click()
+        print("Clicked 'Print document'.")
+    except Exception as e:
+        print(f"Warning: could not click Print document: {e}")
+        return
+
+    # 2. Wait for the popover and click Edit
+    edit_btn = page.locator("[data-id='fulfillment.create_shipping_label.print_document_edit']").first
+    try:
+        await edit_btn.wait_for(state="visible", timeout=10_000)
+        await edit_btn.click()
+        print("Clicked 'Edit' in print document popover.")
+    except Exception as e:
+        print(f"Warning: could not click Edit in print popover: {e}")
+        return
+
+    # 3. Wait for the drawer
+    drawer = page.locator(".core-drawer-inner").first
+    try:
+        await drawer.wait_for(state="visible", timeout=10_000)
+    except Exception as e:
+        print(f"Warning: print settings drawer did not appear: {e}")
+        return
+
+    # 4. Ensure Shipping label and Packing slip checkboxes are checked
+    for data_id, label in [
+        ("fulfillment.print_document.selection.shipping_label", "Shipping label"),
+        ("fulfillment.print_document.selection.packing_slip", "Packing slip"),
+    ]:
+        cb_label = page.locator(f"label[data-id='{data_id}']").first
+        cb_input = cb_label.locator("input[type='checkbox']").first
+        try:
+            await cb_input.wait_for(state="attached", timeout=5_000)
+            is_checked = await cb_input.is_checked()
+            if not is_checked:
+                await cb_label.click()
+                print(f"Checked '{label}'.")
+            else:
+                print(f"'{label}' already checked.")
+        except Exception as e:
+            print(f"Warning: could not check '{label}': {e}")
+
+    # 5. Click Confirm
+    confirm_btn = page.locator("button[data-log_click_for='select_print_document_drawer_confirm']").first
+    try:
+        await confirm_btn.wait_for(state="visible", timeout=5_000)
+        await confirm_btn.click()
+        print("Clicked Confirm on print settings drawer.")
+    except Exception as e:
+        print(f"Warning: could not click Confirm on print settings: {e}")
+
+
 async def navigate_to_awaiting_shipment(
     page: Page,
     sku: str,
@@ -673,6 +734,7 @@ async def navigate_to_awaiting_shipment(
     await _wait_for_shipment_page_and_select_all(page)
     await _click_bulk_select_all_if_present(page)
     await _batch_edit_weight(page, weight)
+    await _print_document(page)
 
 
 ARRANGE_SHIPMENT_SELECTORS = [
