@@ -593,7 +593,19 @@ async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
     print("Waiting for shipment page to load...")
     # The arrange-shipment button navigates to a new URL; wait for that navigation
     await page.wait_for_load_state("domcontentloaded")
-    await asyncio.sleep(4)  # allow JS to render the table
+
+    # Wait for the table body rows to actually populate (async data load)
+    print("Waiting for shipment table rows to populate...")
+    try:
+        await page.wait_for_selector(
+            "table[data-table-component='true'] tbody tr",
+            state="visible",
+            timeout=30_000,
+        )
+        print("Shipment table rows detected.")
+    except Exception:
+        print("Warning: could not confirm table rows; proceeding anyway.")
+    await asyncio.sleep(1)  # brief settle after rows appear
 
     # Locate the select-all label using the same selectors, with fallbacks
     label: Optional[Locator] = None
