@@ -815,10 +815,13 @@ async def navigate_to_awaiting_shipment(
 
     if mode == "mixed-orders":
         await _apply_shipping_method_filter(page, shipping_method)
-        await asyncio.sleep(2)  # wait for filtered results to load
     else:
         await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
-        await asyncio.sleep(2)  # wait for filtered results to load
+
+    # Wait for the filtered rows to actually appear before selecting.
+    print("Waiting for filtered rows to appear...")
+    await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
+    print("Filtered rows visible.")
 
     await _click_select_all_checkbox(page)
     if mode != "mixed-orders":
