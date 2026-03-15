@@ -827,6 +827,8 @@ async def main():
                         help="Shipping Method filter value (default: 'TikTok Shipping (Upgraded)')")
     parser.add_argument("--combine-split", default="Original", dest="combine_split",
                         help="Order combine/split filter value (default: 'Original')")
+    parser.add_argument("--weight", type=float, default=None, dest="weight",
+                        help="Package weight in kg to set (e.g. 0.65)")
     args = parser.parse_args()
 
     async with async_playwright() as playwright:
