@@ -215,20 +215,33 @@ PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 COMBINE_CONFIRM_BUTTON_SELECTORS = [
     "button[data-id='fulfillment.combine_package.confirm_all_combination']",
     "button[data-log_click_for='accept_all_combination']",
-    "//button[.//span[normalize-space()='Combine orders and continue']]",
+    "//button[.//span[contains(normalize-space(),'combinations and continue')]]",
+    "//button[.//span[contains(normalize-space(),'combination and continue')]]",
 ]
 
+REFRESH_ORDERS_SELECTOR = "button[data-log_click_for='refresh_orders']"
 
-async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
+
+async def _click_refresh_orders_button(page: Page) -> None:
+    """Click the refresh orders button and wait for the page to settle."""
+    try:
+        btn = page.locator(REFRESH_ORDERS_SELECTOR).first
+        await btn.wait_for(state="visible", timeout=10_000)
+        await btn.click()
+        print("Refresh orders button clicked.")
+        await asyncio.sleep(3)  # wait for orders to reload after combining
+    except Exception as e:
+        print(f"Warning: could not click refresh orders button: {e}")
+
+
+async def handle_combine_orders_modal(page: Page, timeout: float = 15.0) -> bool:
     """
-    Return True only if the Combine Orders modal was actually present and acted upon.
+    Check for the Combine Orders modal and handle it if present.
 
-    Polls for the "Combine orders and continue" confirm button for up to `timeout`
-    seconds.  When found, scrolls to it and tries several click strategies
-    (normal click → JS click → Space key → MouseEvent dispatch).  Returns True
-    as soon as the button disappears after a click, meaning the modal was
-    successfully dismissed.  Returns the last value of `seen` (True if the
-    button was ever visible) if the timeout expires before the modal clears.
+    Polls for the "Accept all X combinations and continue" button for up to
+    `timeout` seconds. When found, clicks it, waits for combining to finish,
+    then clicks the refresh orders button. Returns True if the modal was found
+    and handled, False otherwise.
     """
     import time as _time
 
@@ -248,7 +261,7 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
                 continue
 
         if btn is None:
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.3)
             continue
 
         seen = True
@@ -298,7 +311,7 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
             except Exception:
                 pass
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
 
         # If the button is gone the modal was dismissed — success
         still_visible = False
@@ -312,7 +325,9 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
                 continue
 
         if not still_visible:
-            print("Combine Orders modal dismissed.")
+            print("Combine Orders modal dismissed. Waiting for combining to finish...")
+            await asyncio.sleep(3)  # wait for combining to complete
+            await _click_refresh_orders_button(page)
             return True
 
     return seen
@@ -564,6 +579,15 @@ async def navigate_to_awaiting_shipment(
     await _click_select_all_checkbox(page)
     await _click_bulk_select_all_if_present(page)
     await _click_arrange_shipment_button(page)
+
+    # If a "Combine orders" popup appears, accept it, wait for combining to
+    # finish, and click refresh before proceeding to the shipment page.
+    combined = await handle_combine_orders_modal(page, timeout=15.0)
+    if combined:
+        print("Orders combined. Proceeding to shipment page...")
+    else:
+        print("No combine orders modal appeared. Proceeding normally.")
+
     await _wait_for_shipment_page_and_select_all(page)
 
 
