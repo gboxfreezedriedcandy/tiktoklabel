@@ -332,6 +332,33 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 15.0) -> bool
     return seen
 
 
+async def _apply_shipping_method_filter(page: Page, shipping_method: str) -> None:
+    """Apply only the Shipping Method filter (used by mixed-orders mode)."""
+    filter_btn = page.locator("button", has_text="Filter").first
+    await filter_btn.wait_for(state="visible", timeout=15_000)
+    await filter_btn.click()
+    print("Filter panel opened.")
+    await asyncio.sleep(1)
+
+    shipping_combobox = page.locator(
+        '[data-log_click_for="filter_select"][data-log_json*="fulfillment_type_v2_comp_us"] [role="combobox"]'
+    )
+    await shipping_combobox.wait_for(state="visible", timeout=8_000)
+    await shipping_combobox.click()
+    await asyncio.sleep(0.5)
+    shipping_option = page.locator(
+        '[data-log_click_for="filter_select_option"]', has_text=shipping_method
+    )
+    await shipping_option.wait_for(state="visible", timeout=8_000)
+    await shipping_option.click()
+    print(f"'{shipping_method}' selected from Shipping Method dropdown.")
+
+    apply_btn = page.locator('[data-log_click_for="apply"]')
+    await apply_btn.wait_for(state="visible", timeout=10_000)
+    await apply_btn.click()
+    print("Filter applied.")
+
+
 async def _apply_product_filter(
     page: Page,
     sku: str,
@@ -732,30 +759,29 @@ async def navigate_to_awaiting_shipment(
     shipping_method: str,
     combine_split: str,
     weight: float | None = None,
+    mode: str = "single-order",
 ) -> None:
     """
-    Navigate to Manage Orders and filter to 'Awaiting shipment' orders
-    for the given product SKU and filter values.
+    Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
 
-    Steps:
-      1. Go to the orders page.
-      2. Click the Filter button and filter by product SKU.
-      3. Click the select-all checkbox to select all visible rows.
+    mode='single-order': applies all filters; clicks bulk-select-all on both pages.
+    mode='mixed-orders': applies only shipping_method filter; skips bulk-select-all.
     """
     print(f"Navigating to Manage Orders: {ORDERS_URL}")
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
     await asyncio.sleep(4)  # wait for JS-rendered page
 
-    await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
+    if mode == "mixed-orders":
+        await _apply_shipping_method_filter(page, shipping_method)
+    else:
+        await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
     await asyncio.sleep(2)  # wait for filtered results to load
-    print(f"Filter applied: product={sku}")
 
     await _click_select_all_checkbox(page)
-    await _click_bulk_select_all_if_present(page)
+    if mode != "mixed-orders":
+        await _click_bulk_select_all_if_present(page)
     await _click_arrange_shipment_button(page)
 
-    # If a "Combine orders" popup appears, accept it, wait for combining to
-    # finish, and click refresh before proceeding to the shipment page.
     combined = await handle_combine_orders_modal(page, timeout=15.0)
     if combined:
         print("Orders combined. Proceeding to shipment page...")
@@ -763,7 +789,8 @@ async def navigate_to_awaiting_shipment(
         print("No combine orders modal appeared. Proceeding normally.")
 
     await _wait_for_shipment_page_and_select_all(page)
-    await _click_bulk_select_all_if_present(page)
+    if mode != "mixed-orders":
+        await _click_bulk_select_all_if_present(page)
     await _batch_edit_weight(page, weight)
     await _print_document(page)
 
@@ -984,6 +1011,7 @@ async def main():
             await navigate_to_awaiting_shipment(
                 page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
                 weight=args.weight,
+                mode=args.mode,
             )
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
