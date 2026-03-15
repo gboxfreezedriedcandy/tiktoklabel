@@ -1056,8 +1056,9 @@ async def scan_order_skus(page: Page) -> None:
             sku = "(parse error)"
         skus.append(sku)
 
-        # Dismiss popover
-        await page.keyboard.press("Escape")
+        # Click the weight edit button to proceed/dismiss
+        edit_btn = popover.locator("svg.theme-arco-icon-edit").first
+        await edit_btn.click()
         await asyncio.sleep(0.2)
 
     print("\n=== SKUs found ===")
