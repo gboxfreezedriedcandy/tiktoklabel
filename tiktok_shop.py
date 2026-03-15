@@ -1069,16 +1069,62 @@ async def scan_order_skus(page: Page) -> None:
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
 
-        # Click the weight edit icon (force=True bypasses the product popover overlay).
-        edit_btn = page.locator("svg.theme-arco-icon-edit").first
-        await edit_btn.click(force=True)
-
-        # Confirm the weight popover appeared.
+        # Click the weight edit icon using multiple strategies until the popover opens.
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
+        edit_icon = page.locator("svg.theme-arco-icon-edit").first
+
+        async def _weight_popover_visible() -> bool:
+            try:
+                await weight_popover.wait_for(state="visible", timeout=1_500)
+                return True
+            except Exception:
+                return False
+
+        weight_opened = False
+        for _strategy in ("force", "js", "dispatch"):
+            try:
+                if _strategy == "force":
+                    await edit_icon.click(force=True)
+                elif _strategy == "js":
+                    handle = await edit_icon.element_handle()
+                    if handle:
+                        await page.evaluate("el => el.click()", handle)
+                else:
+                    handle = await edit_icon.element_handle()
+                    if handle:
+                        await page.evaluate(
+                            "el => el.dispatchEvent(new MouseEvent('click',"
+                            " {bubbles:true,cancelable:true,view:window}))",
+                            handle,
+                        )
+            except Exception:
+                pass
+            if await _weight_popover_visible():
+                weight_opened = True
+                break
+
+        if not weight_opened:
+            print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
+            continue
+
+        # Set the weight to 1 using the same key-event approach that works for
+        # Vue-controlled inputs (fill() / JS setter do not trigger v-model).
+        weight_input = weight_popover.locator("input#packageWeight_input").first
         try:
-            await weight_popover.wait_for(state="visible", timeout=5_000)
-        except Exception:
-            print(f"  Row {i + 1}: warning — weight popover did not appear after edit click.")
+            await weight_input.wait_for(state="visible", timeout=5_000)
+            await weight_input.click()
+            await weight_input.press("Control+a")
+            await weight_input.press("Backspace")
+            await weight_input.type("1", delay=50)
+            actual = await weight_input.input_value()
+            print(f"  Row {i + 1}: weight set to {actual!r}")
+        except Exception as e:
+            print(f"  Row {i + 1}: warning — could not set weight: {e}")
+            continue
+
+        # Confirm the value (Enter closes/saves the inline popover).
+        await weight_input.press("Enter")
+        await asyncio.sleep(0.5)
 
     print("\n=== SKUs found ===")
     for idx, order_skus in enumerate(skus, 1):
