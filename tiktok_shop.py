@@ -1069,9 +1069,10 @@ async def scan_order_skus(page: Page) -> None:
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
 
-        # Close the product popover before interacting with the weight cell.
-        await page.keyboard.press("Escape")
+        # Close the product popover by clicking the trigger cell again (toggle),
+        # then wait for it to disappear before interacting with the weight cell.
         try:
+            await trigger.click()
             await popover.wait_for(state="hidden", timeout=2_000)
         except Exception:
             pass
