@@ -587,12 +587,53 @@ async def _click_bulk_select_all_if_present(page: Page) -> None:
     print("Warning: could not click bulk-select-all button after all strategies.")
 
 
+async def _batch_edit_weight(page: Page, weight: float | None) -> None:
+    """Click 'Edit weight', set the weight value, and click Apply.
+    Skips silently if weight is None or the button is not found."""
+    if weight is None:
+        return
+
+    edit_btn_selector = "button[data-log_click_for='4pl_batch_edit_weight_all_package_info']"
+    try:
+        btn = page.locator(edit_btn_selector).first
+        await btn.wait_for(state="visible", timeout=10_000)
+        await btn.click()
+        print(f"Edit weight button clicked. Setting weight to {weight}.")
+    except Exception as e:
+        print(f"Warning: could not click Edit weight button: {e}")
+        return
+
+    # Wait for the drawer to appear and fill the input
+    input_selector = "input#packageWeight_input"
+    try:
+        inp = page.locator(input_selector).first
+        await inp.wait_for(state="visible", timeout=10_000)
+        await inp.triple_click()
+        await inp.fill(str(weight))
+        print(f"Weight set to {weight}.")
+    except Exception as e:
+        print(f"Warning: could not set weight value: {e}")
+        return
+
+    # Click the Apply button
+    apply_selector = "button[data-log_click_for='bulk_edit_weight_amending_apply']"
+    try:
+        apply_btn = page.locator(apply_selector).first
+        await apply_btn.wait_for(state="visible", timeout=10_000)
+        await apply_btn.click()
+        print("Apply clicked for batch weight edit.")
+        await asyncio.sleep(2)
+    except Exception as e:
+        print(f"Warning: could not click Apply for weight edit: {e}")
+
+
 async def navigate_to_awaiting_shipment(
     page: Page,
     sku: str,
     order_contents: str,
     shipping_method: str,
     combine_split: str,
+    weight: float | None = None,
 ) -> None:
     """
     Navigate to Manage Orders and filter to 'Awaiting shipment' orders
@@ -625,6 +666,7 @@ async def navigate_to_awaiting_shipment(
 
     await _wait_for_shipment_page_and_select_all(page)
     await _click_bulk_select_all_if_present(page)
+    await _batch_edit_weight(page, weight)
 
 
 ARRANGE_SHIPMENT_SELECTORS = [
@@ -835,7 +877,8 @@ async def main():
         print(f"Current URL: {page.url}")
 
         await navigate_to_awaiting_shipment(
-            page, args.sku, args.order_contents, args.shipping_method, args.combine_split
+            page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
+            weight=args.weight,
         )
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
