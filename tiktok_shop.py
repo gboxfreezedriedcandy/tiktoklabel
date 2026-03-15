@@ -793,6 +793,17 @@ async def navigate_to_awaiting_shipment(
         await _apply_shipping_method_filter(page, shipping_method)
         await asyncio.sleep(2)  # wait for filtered results to load
         await _set_page_size(page, 50)
+        print("Waiting for orders to populate after page size change...")
+        try:
+            await page.wait_for_selector(
+                "table tbody tr",
+                state="visible",
+                timeout=15_000,
+            )
+            print("Orders populated.")
+        except Exception:
+            print("Warning: could not confirm orders loaded; proceeding anyway.")
+        await asyncio.sleep(1)
     else:
         await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
         await asyncio.sleep(2)  # wait for filtered results to load
