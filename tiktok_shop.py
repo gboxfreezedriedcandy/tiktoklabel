@@ -1048,7 +1048,7 @@ async def scan_order_skus(page: Page) -> None:
             continue
 
         # Extract the "Seller SKU: …" text
-        sku_div = popover.locator("div:has-text('Seller SKU:')").last
+        sku_div = popover.locator("div.line-clamp-2:has-text('Seller SKU:')").first
         try:
             raw = await sku_div.inner_text()
             sku = raw.replace("Seller SKU:", "").strip()
