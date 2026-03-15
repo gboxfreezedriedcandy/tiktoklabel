@@ -332,6 +332,19 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 15.0) -> bool
     return seen
 
 
+async def _set_page_size(page: Page, size: int) -> None:
+    """Change the pagination page-size dropdown to the given value (e.g. 50)."""
+    combobox = page.locator('.core-pagination-option [role="combobox"]')
+    await combobox.wait_for(state="visible", timeout=10_000)
+    await combobox.click()
+    await asyncio.sleep(0.5)
+    option = page.locator('[role="option"]', has_text=f"{size}/Page")
+    await option.wait_for(state="visible", timeout=8_000)
+    await option.click()
+    print(f"Page size set to {size}.")
+    await asyncio.sleep(1)
+
+
 async def _apply_shipping_method_filter(page: Page, shipping_method: str) -> None:
     """Apply only the Shipping Method filter (used by mixed-orders mode)."""
     filter_btn = page.locator("button", has_text="Filter").first
@@ -772,6 +785,7 @@ async def navigate_to_awaiting_shipment(
     await asyncio.sleep(4)  # wait for JS-rendered page
 
     if mode == "mixed-orders":
+        await _set_page_size(page, 50)
         await _apply_shipping_method_filter(page, shipping_method)
     else:
         await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
