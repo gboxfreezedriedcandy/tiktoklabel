@@ -839,7 +839,8 @@ async def navigate_to_awaiting_shipment(
         await _click_bulk_select_all_if_present(page)
     if mode == "mixed-orders":
         await scan_order_skus(page)
-    await _batch_edit_weight(page, weight)
+    else:
+        await _batch_edit_weight(page, weight)
     await _print_document(page)
 
 
