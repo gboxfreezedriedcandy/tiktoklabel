@@ -516,6 +516,23 @@ async def _click_select_all_checkbox(page: Page) -> None:
     )
 
 
+async def _click_bulk_select_all_if_present(page: Page) -> None:
+    """
+    After the header checkbox is checked, TikTok may show a 'Select all N orders'
+    button (data-log_click_for='bulk_select') when the total exceeds the current
+    page.  Click it if it appears so that ALL orders across pages are selected.
+    """
+    selector = "button[data-log_click_for='bulk_select'][data-id='fulfillment.table.select_all_package']"
+    try:
+        btn = page.locator(selector).first
+        await btn.wait_for(state="visible", timeout=3_000)
+        total = await btn.get_attribute("data-log_total_cnt") or "?"
+        await btn.click()
+        print(f"Clicked 'Select all {total} orders' bulk-select button.")
+    except Exception:
+        print("No bulk-select-all button found; current page selection is sufficient.")
+
+
 async def navigate_to_awaiting_shipment(
     page: Page,
     sku: str,
@@ -541,6 +558,7 @@ async def navigate_to_awaiting_shipment(
     print(f"Filter applied: product={sku}")
 
     await _click_select_all_checkbox(page)
+    await _click_bulk_select_all_if_present(page)
     await _click_arrange_shipment_button(page)
     await _wait_for_shipment_page_and_select_all(page)
 
