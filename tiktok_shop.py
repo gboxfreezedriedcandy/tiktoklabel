@@ -881,6 +881,17 @@ async def _print_document(page: Page) -> None:
         print(f"Warning: could not click Confirm on print settings: {e}")
 
 
+async def _click_buy_and_print(page: Page) -> None:
+    """Click the 'Arrange shipment+print' button to finalise and print labels."""
+    btn = page.locator("[data-id='fulfillment.create_shipping_label.buy_and_print_label']").first
+    try:
+        await btn.wait_for(state="visible", timeout=15_000)
+        await btn.click()
+        print("Clicked 'Arrange shipment+print'.")
+    except Exception as e:
+        print(f"Warning: could not click 'Arrange shipment+print': {e}")
+
+
 async def combine_orders_mode(page: Page) -> None:
     """
     combine-orders mode: no filters, select all, arrange shipment,
@@ -920,6 +931,7 @@ async def navigate_to_awaiting_shipment(
     combine_split: str,
     weight: float | None = None,
     mode: str = "single-order",
+    do_print: bool = True,
 ) -> None:
     """
     Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
@@ -966,6 +978,10 @@ async def navigate_to_awaiting_shipment(
     else:
         await _batch_edit_weight(page, weight)
     await _print_document(page)
+    if do_print:
+        await _click_buy_and_print(page)
+    else:
+        print("Skipping 'Arrange shipment+print' (--print no).")
 
 
 ARRANGE_SHIPMENT_SELECTORS = [
@@ -1297,6 +1313,8 @@ async def main():
                         help="Order processing mode (default: single-order)")
     parser.add_argument("--account", default="default",
                         help="Account name to use for login (determines which cookies file to load, e.g. 'foo' → cookies_foo.json)")
+    parser.add_argument("--print", default="yes", choices=["yes", "no"], dest="do_print",
+                        help="Whether to click 'Arrange shipment+print' (default: yes)")
     args = parser.parse_args()
 
     async with async_playwright() as playwright:
@@ -1313,6 +1331,7 @@ async def main():
                 page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
                 weight=args.weight,
                 mode=args.mode,
+                do_print=args.do_print == "yes",
             )
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
