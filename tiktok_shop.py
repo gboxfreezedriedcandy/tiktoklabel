@@ -677,16 +677,16 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         return
 
     # Wait for the drawer, then clear the input and type the new value.
-    # Using click + Ctrl+A + keyboard type triggers real key events that
-    # Vue's v-model picks up (JS setter / fill() both fail on this component).
+    # triple_click() reliably selects all text so the typed value replaces it.
+    # Using keyboard type (not fill) triggers real key events that Vue's v-model
+    # picks up (JS setter / fill() both fail on this component).
     input_selector = "input#packageWeight_input"
     try:
         inp = page.locator(input_selector).first
         await inp.wait_for(state="visible", timeout=10_000)
-        await inp.click()
-        await inp.press("Control+a")
-        await inp.press("Backspace")
-        await inp.type(str(weight), delay=50)
+        await inp.triple_click()
+        await asyncio.sleep(0.2)
+        await inp.type(str(weight), delay=100)
         # Confirm the value was accepted
         actual = await inp.input_value()
         print(f"Weight input value after typing: {actual!r}")
