@@ -823,8 +823,8 @@ async def navigate_to_awaiting_shipment(
     await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
     print("Filtered rows visible.")
 
-    await _click_select_all_checkbox(page)
     if mode != "mixed-orders":
+        await _click_select_all_checkbox(page)
         await _click_bulk_select_all_if_present(page)
     await _click_arrange_shipment_button(page)
 
@@ -834,8 +834,8 @@ async def navigate_to_awaiting_shipment(
     else:
         print("No combine orders modal appeared. Proceeding normally.")
 
-    await _wait_for_shipment_page_and_select_all(page)
     if mode != "mixed-orders":
+        await _wait_for_shipment_page_and_select_all(page)
         await _click_bulk_select_all_if_present(page)
     if mode == "mixed-orders":
         await scan_order_skus(page)
