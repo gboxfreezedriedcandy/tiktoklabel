@@ -1066,38 +1066,30 @@ async def scan_order_skus(page: Page) -> None:
         # Wait for the product popover
         popover = page.locator("[data-log_module_name='product_edit_popover']").first
         try:
-            await popover.wait_for(state="visible", timeout=5_000)
+            await popover.wait_for(state="visible", timeout=2_000)
         except Exception:
             print(f"Row {i}: popover did not appear.")
             skus.append([("(no popover)", "")])
             continue
 
-        # Each product row contains a 'Seller SKU:' element.
-        # core-space-item also matches image/qty/other divs, so only process
-        # items that actually contain a 'Seller SKU:' element.
-        items = popover.locator("div[data-tid='m4b_space'] > div.core-space-item")
-        item_count = await items.count()
-        order_skus: list[tuple[str, str]] = []
-        seen_skus: set[str] = set()
-        for j in range(item_count):
-            item = items.nth(j)
-            sku_el = item.locator("div.line-clamp-2:has-text('Seller SKU:')").first
-            if await sku_el.count() == 0:
-                continue
-            try:
-                raw = await sku_el.inner_text()
-                sku = raw.replace("Seller SKU:", "").strip()
-            except Exception:
-                continue
-            if sku in seen_skus:
-                continue
-            seen_skus.add(sku)
-            qty_el = item.locator("[data-tid='m4b_input_number']").first
-            try:
-                qty = await qty_el.get_attribute("value") or "1"
-            except Exception:
-                qty = "1"
-            order_skus.append((sku, qty))
+        # Extract all SKU+qty pairs in one JS round-trip instead of per-item awaits.
+        raw_items: list[list[str]] = await popover.evaluate("""el => {
+            const seen = new Set();
+            const out = [];
+            el.querySelectorAll("div[data-tid='m4b_space'] > div.core-space-item").forEach(item => {
+                const skuEl = item.querySelector("div.line-clamp-2");
+                if (!skuEl) return;
+                const txt = skuEl.innerText || '';
+                if (!txt.includes('Seller SKU:')) return;
+                const sku = txt.replace('Seller SKU:', '').trim();
+                if (!sku || seen.has(sku)) return;
+                seen.add(sku);
+                const qtyEl = item.querySelector("[data-tid='m4b_input_number']");
+                out.push([sku, qtyEl ? (qtyEl.value || '1') : '1']);
+            });
+            return out;
+        }""")
+        order_skus: list[tuple[str, str]] = [(s, q) for s, q in raw_items]
         skus.append(order_skus)
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
