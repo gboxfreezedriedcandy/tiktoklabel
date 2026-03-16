@@ -1115,15 +1115,16 @@ async def scan_order_skus(page: Page) -> None:
         edit_icon = row.locator("svg.theme-arco-icon-edit").first
 
         weight_opened = False
-        for attempt in range(2):
+        try:
+            await edit_icon.click(force=True)
+            await weight_popover.wait_for(state="visible", timeout=800)
+            weight_opened = True
+        except Exception:
+            # one retry with a longer window
             try:
                 await edit_icon.click(force=True)
-            except Exception:
-                pass
-            try:
-                await weight_popover.wait_for(state="visible", timeout=2_000)
+                await weight_popover.wait_for(state="visible", timeout=1_500)
                 weight_opened = True
-                break
             except Exception:
                 pass
 
