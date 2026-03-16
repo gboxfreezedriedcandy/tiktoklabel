@@ -1110,39 +1110,22 @@ async def scan_order_skus(page: Page) -> None:
         except Exception:
             pass
 
-        # Click the weight edit icon using multiple strategies until the popover opens.
+        # Click the weight edit icon scoped to this row (avoids hitting another row's icon).
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
-        edit_icon = page.locator("svg.theme-arco-icon-edit").first
-
-        async def _weight_popover_visible() -> bool:
-            try:
-                await weight_popover.wait_for(state="visible", timeout=1_500)
-                return True
-            except Exception:
-                return False
+        edit_icon = row.locator("svg.theme-arco-icon-edit").first
 
         weight_opened = False
-        for _strategy in ("force", "js", "dispatch"):
+        for attempt in range(2):
             try:
-                if _strategy == "force":
-                    await edit_icon.click(force=True)
-                elif _strategy == "js":
-                    handle = await edit_icon.element_handle()
-                    if handle:
-                        await page.evaluate("el => el.click()", handle)
-                else:
-                    handle = await edit_icon.element_handle()
-                    if handle:
-                        await page.evaluate(
-                            "el => el.dispatchEvent(new MouseEvent('click',"
-                            " {bubbles:true,cancelable:true,view:window}))",
-                            handle,
-                        )
+                await edit_icon.click(force=True)
             except Exception:
                 pass
-            if await _weight_popover_visible():
+            try:
+                await weight_popover.wait_for(state="visible", timeout=2_000)
                 weight_opened = True
                 break
+            except Exception:
+                pass
 
         if not weight_opened:
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
