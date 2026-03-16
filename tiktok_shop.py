@@ -1224,12 +1224,15 @@ async def scan_order_skus(page: Page) -> None:
             continue
 
         # Compute weight from SKU lookup: sum(unit_weight * qty) for each SKU.
+        for sku, _ in order_skus:
+            if sku not in SKU_WEIGHTS:
+                print(f"  Row {i + 1}: warning — no weight entry for SKU '{sku}'")
         total_weight = sum(
             SKU_WEIGHTS.get(sku, 0) * float(qty)
             for sku, qty in order_skus
         )
         if total_weight <= 0:
-            print(f"  Row {i + 1}: warning — no weight found for SKUs {order_skus}; skipping weight set.")
+            print(f"  Row {i + 1}: warning — total weight is 0; skipping weight set.")
             continue
         weight_str = str(round(total_weight, 5)).rstrip("0").rstrip(".")
 
