@@ -218,6 +218,105 @@ async def _click_awaiting_shipment_option(page: Page) -> None:
 
 PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 
+# Weight (kg) per SKU used to auto-fill the package weight field.
+SKU_WEIGHTS: dict[str, float] = {
+    "G-BOX-GIFT-BOX-V1": 2,
+    "G-BOX-FD-CHOCOLATE-ECLAIR-M": 0.3,
+    "G-BOX-FD-CHOCOLATE-ECLAIR-L": 0.59375,
+    "G-BOX-SOUR-WORM-GUMMY": 0.24375,
+    "G-BOX-WORM-GUMMY": 0.2375,
+    "G-BOX-CROCODILES-GUMMY": 0.2375,
+    "G-BOX-FD-JELLO-SAMPLE-PACK": 1.75,
+    "G-BOX-FD-JELLO-WATERMELON-M": 0.19375,
+    "G-BOX-FD-JELLO-WATERMELON-L": 0.35625,
+    "G-BOX-FD-JELLO-CHERRY-L": 0.3625,
+    "G-BOX-FD-JELLO-CHERRY-M": 0.20625,
+    "G-BOX-FD-JELLO-LEMON-L": 0.38125,
+    "G-BOX-FD-JELLO-LEMON-M": 0.2125,
+    "G-BOX-FD-JELLO-PEACH-L": 0.375,
+    "G-BOX-FD-JELLO-PEACH-M": 0.2,
+    "G-BOX-FD-JELLO-STRAWBERRY-L": 0.375,
+    "G-BOX-FD-JELLO-STRAWBERRY-M": 0.20625,
+    "G-BOX-FD-JELLO-STRAWBERRY-PINK-L": 0.325,
+    "G-BOX-FD-JELLO-STRAWBERRY-PINK-M": 0.2,
+    "G-BOX-FD-JELLO-BLUEBERRY-L": 0.35625,
+    "G-BOX-FD-JELLO-BLUEBERRY-M": 0.20625,
+    "G-BOX-FD-JELLO-LIME-L": 0.36875,
+    "G-BOX-FD-JELLO-LIME-M": 0.19375,
+    "G-BOX-FD-JELLO-ORANGE-L": 0.4,
+    "G-BOX-FD-JELLO-ORANGE-M": 0.20625,
+    "G-BOX-FD-JELLO-PINEAPPLE-L": 0.3625,
+    "G-BOX-FD-JELLO-PINEAPPLE-M": 0.20625,
+    "RANCH-CUCUMBER-LARGE": 0.18125,
+    "G-BOX-PICKLES-SMALL": 0.11875,
+    "G-BOX-PICKLES-MEDIUM": 0.11875,
+    "G-BOX-PICKLES-LARGE": 0.18125,
+    "G-BOX-CHAMOY-PICKLES-LARGE": 0.2625,
+    "G-BOX-CHAMOY-PICKLES-SMALL": 0.14375,
+    "CHAMOY-CUCUMBER-LARGE": 0.2625,
+    "G-BOX-FRUIT-ROLL-UP-L": 0.375,
+    "G-BOX-FRUIT-ROLL-UP-M": 0.21875,
+    "G-BOX-FD-LEMONCANDY-8OZ": 0.625,
+    "LEMONCANDY-4OZ": 0.3125,
+    "G-BOX-FD-GUMMY-BEAR": 0.5625,
+    "G-BOX-FD-FROZEN-GUMMY-BEAR": 0.5625,
+    "G-BOX-FD-AIR-CRUNCH": 0.4,
+    "G-BOX-SOUR-FRETTLE-SMALL": 0.275,
+    "G-BOX-SOUR-MEDIUM": 0.41875,
+    "G-BOX-FD-FRETTLES-LARGE": 0.8,
+    "G-BOX-SOUR-FRETTLE-LARGE": 0.79375,
+    "G-BOX-FD-FRETTLES-SMALL": 0.275,
+    "G-BOX-FD-FRETTLES-MEDIUM": 0.4625,
+    "G-BOX-FD-WILDBERRY-SMALL": 0.23125,
+    "G-BOX-FD-MARSHMALLOWS-MINI": 0.3375,
+    "G-BOX-FD-MARSHMALLOWS-CAR-M": 0.35625,
+    "G-BOX-FD-MARSHMALLOWS-CAR-L": 0.5375,
+    "G-BOX-LARGE-GUMMY-CLUSTER": 0.4875,
+    "G-BOX-FD-ICECREAM-SANDWICH-3OZ": 0.3375,
+    "G-BOX-FD-ICECREAM-SANDWICH-7OZ": 0.59375,
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-S": 0.203125,
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-M": 0.2625,
+    "G-BOX-FD-STRAWBERRY-SHORTCAKE-L": 0.53125,
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M": 0.24375,
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L": 0.44375,
+    "G-BOX-FD-ICECREAMCUBESVANILLA-L": 0.44375,
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M": 0.2875,
+    "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L": 0.43125,
+    "G-BOX-CHAMOY-FRETTLES-MEDIUM": 0.45625,
+    "G-BOX-CHAMOY-FRETTLES-LARGE": 0.8,
+    "G-BOX-CHAMOY-MEDIUM": 0.45625,
+    "G-BOX-CHAMOY-LARGE": 0.8,
+    "G-BOX-PEACH-RING": 0.33125,
+    "G-BOX-CHAMOY-PEACH-RING": 0.34375,
+    "G-BOX-FD-STRAWBERRY-GUMMY": 0.3,
+    "G-BOX-FD-WATERMELON-GUMMY": 0.475,
+    "G-BOX-FD-HONEY-CANDY": 0.475,
+    "G-BOX-SUBSCRIPTION-BOX-V1": 2,
+    "G-BOX-FD-FRETTLES-XLARGE": 1.5625,
+    "G-BOX-FD-GUMMY-FROGS-3": 0.21875,
+    "G-BOX-FD-TAFFY-COTTON-CANDY": 0.28125,
+    "G-BOX-FD-TAFFY-VANILLA": 0.33125,
+    "G-BOX-FD-TAFFY-WATERMELON": 0.25,
+    "G-BOX-FD-TAFFY-BANANA": 0.2375,
+    "G-BOX-FD-TAFFY-PEPPERMINT": 0.2625,
+    "G-BOX-FD-TAFFY-GREEN-APPLE": 0.28125,
+    "G-BOX-FD-TAFFY-SHAVED-ICE": 0.3125,
+    "G-BOX-FD-TAFFY-KIWI-STRAWBERRY": 0.28125,
+    "G-BOX-FD-TAFFY-BLACKBERRY-CRUMBLE": 0.325,
+    "G-BOX-FD-CHOCO-CRUNCH-L": 0.5,
+    "G-BOX-FD-CHOCO-CRUNCH-M": 0.24375,
+    "G-BOX-FD-FRETTLES-SOUR-XLARGE": 1.8125,
+    "G-BOX-SOUR-FRETTLE-MEDIUM": 0.35,
+    "G-BOX-FREESES-M": 0.3375,
+    "G-BOX-FREESES-L": 0.625,
+    "G-BOX-CHAMOY-FRETTLES-XL-JAR": 1.875,
+    "G-BOX-FD-JELLO-BB-LEMON-L": 0.35,
+    "G-BOX-FD-JELLO-BB-LEMON-M": 0.20625,
+    "G-BOX-FD-DUBAI-CHOCOLATE-L": 0.75625,
+    "G-BOX-FD-DUBAI-CHOCOLATE-M": 0.4125,
+    "G-BOX-FD-DUBAI-CHOCOLATE-S": 0.1875,
+}
+
 # --- Combine Orders modal ---
 COMBINE_CONFIRM_BUTTON_SELECTORS = [
     "button[data-id='fulfillment.combine_package.confirm_all_combination']",
@@ -1124,8 +1223,17 @@ async def scan_order_skus(page: Page) -> None:
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
             continue
 
-        # Set the weight to 1 using the same key-event approach that works for
-        # Vue-controlled inputs (fill() / JS setter do not trigger v-model).
+        # Compute weight from SKU lookup: sum(unit_weight * qty) for each SKU.
+        total_weight = sum(
+            SKU_WEIGHTS.get(sku, 0) * float(qty)
+            for sku, qty in order_skus
+        )
+        if total_weight <= 0:
+            print(f"  Row {i + 1}: warning — no weight found for SKUs {order_skus}; skipping weight set.")
+            continue
+        weight_str = str(round(total_weight, 5)).rstrip("0").rstrip(".")
+
+        # Set the weight using key-event approach (fill()/JS setter don't trigger v-model).
         weight_input = weight_popover.locator("input#packageWeight_input").first
         try:
             await weight_input.wait_for(state="visible", timeout=5_000)
@@ -1133,9 +1241,9 @@ async def scan_order_skus(page: Page) -> None:
             await asyncio.sleep(0.2)
             await weight_input.evaluate("el => el.select()")
             await asyncio.sleep(0.1)
-            await page.keyboard.type("1", delay=50)
+            await page.keyboard.type(weight_str, delay=50)
             actual = await weight_input.input_value()
-            print(f"  Row {i + 1}: weight set to {actual!r}")
+            print(f"  Row {i + 1}: weight set to {actual!r} (computed {weight_str} from {order_skus})")
         except Exception as e:
             print(f"  Row {i + 1}: warning — could not set weight: {e}")
             continue
