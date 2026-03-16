@@ -1047,19 +1047,23 @@ async def scan_order_skus(page: Page) -> None:
             skus.append([("(no popover)", "")])
             continue
 
-        # Each product in the order is a div.core-space-item inside the space container
+        # Each product row contains a 'Seller SKU:' element.
+        # core-space-item also matches image/qty/other divs, so only process
+        # items that actually contain a 'Seller SKU:' element.
         items = popover.locator("div[data-tid='m4b_space'] > div.core-space-item")
         item_count = await items.count()
         order_skus: list[tuple[str, str]] = []
         for j in range(item_count):
             item = items.nth(j)
             sku_el = item.locator("div.line-clamp-2:has-text('Seller SKU:')").first
-            qty_el = item.locator("[data-tid='m4b_input_number']").first
+            if await sku_el.count() == 0:
+                continue
             try:
                 raw = await sku_el.inner_text()
                 sku = raw.replace("Seller SKU:", "").strip()
             except Exception:
-                sku = "(parse error)"
+                continue
+            qty_el = item.locator("[data-tid='m4b_input_number']").first
             try:
                 qty = await qty_el.get_attribute("value") or "1"
             except Exception:
