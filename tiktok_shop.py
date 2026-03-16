@@ -660,6 +660,17 @@ async def _click_bulk_select_all_if_present(page: Page) -> None:
     print("Warning: could not click bulk-select-all button after all strategies.")
 
 
+async def _close_weight_drawer(page: Page) -> None:
+    """Dismiss the batch-edit-weight drawer via Escape, ensuring it doesn't block subsequent clicks."""
+    try:
+        drawer = page.locator("[data-log_module_name='batch_edit_weight_all_package_info_drawer']").first
+        await drawer.wait_for(state="visible", timeout=3_000)
+        await page.keyboard.press("Escape")
+        await drawer.wait_for(state="hidden", timeout=5_000)
+    except Exception:
+        pass
+
+
 async def _batch_edit_weight(page: Page, weight: float | None) -> None:
     """Click 'Edit weight', set the weight value, and click Apply.
     Skips silently if weight is None or the button is not found."""
@@ -677,21 +688,24 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         return
 
     # Wait for the drawer, then clear the input and type the new value.
-    # triple_click() reliably selects all text so the typed value replaces it.
-    # Using keyboard type (not fill) triggers real key events that Vue's v-model
-    # picks up (JS setter / fill() both fail on this component).
+    # Using page.keyboard for Select-All + Delete then type triggers real key
+    # events that Vue's v-model picks up (JS setter / fill() both fail).
     input_selector = "input#packageWeight_input"
     try:
         inp = page.locator(input_selector).first
         await inp.wait_for(state="visible", timeout=10_000)
-        await inp.click(click_count=3)
+        await inp.click()
+        await asyncio.sleep(0.1)
+        await page.keyboard.press("Control+a")
+        await page.keyboard.press("Delete")
         await asyncio.sleep(0.2)
-        await inp.type(str(weight), delay=100)
+        await page.keyboard.type(str(weight), delay=100)
         # Confirm the value was accepted
         actual = await inp.input_value()
         print(f"Weight input value after typing: {actual!r}")
     except Exception as e:
         print(f"Warning: could not set weight value: {e}")
+        await _close_weight_drawer(page)
         return
 
     # Click the Apply button
@@ -704,6 +718,7 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         await asyncio.sleep(2)
     except Exception as e:
         print(f"Warning: could not click Apply for weight edit: {e}")
+        await _close_weight_drawer(page)
 
 
 async def _print_document(page: Page) -> None:
