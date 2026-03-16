@@ -326,7 +326,6 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 15.0) -> bool
         if not still_visible:
             print("Combine Orders modal dismissed. Waiting for combining to finish...")
             await asyncio.sleep(3)  # wait for combining to complete
-            await _click_refresh_orders_button(page)
             return True
 
     return seen
@@ -1186,6 +1185,9 @@ async def main():
 
         if args.mode == "combine-orders":
             await combine_orders_mode(page)
+            print("Done. Closing browser.")
+            await browser.close()
+            return
         else:
             await navigate_to_awaiting_shipment(
                 page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
