@@ -684,7 +684,7 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
     try:
         inp = page.locator(input_selector).first
         await inp.wait_for(state="visible", timeout=10_000)
-        await inp.triple_click()
+        await inp.click(click_count=3)
         await asyncio.sleep(0.2)
         await inp.type(str(weight), delay=100)
         # Confirm the value was accepted
