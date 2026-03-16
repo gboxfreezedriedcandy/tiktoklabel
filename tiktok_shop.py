@@ -841,7 +841,11 @@ async def navigate_to_awaiting_shipment(
 
     # Wait for the filtered rows to actually appear before selecting.
     print("Waiting for filtered rows to appear...")
-    await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
+    try:
+        await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
+    except Exception:
+        print("No orders found after filtering. Nothing to do.")
+        return
     print("Filtered rows visible.")
 
     await _click_select_all_checkbox(page)
