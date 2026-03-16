@@ -1078,6 +1078,7 @@ async def scan_order_skus(page: Page) -> None:
         items = popover.locator("div[data-tid='m4b_space'] > div.core-space-item")
         item_count = await items.count()
         order_skus: list[tuple[str, str]] = []
+        seen_skus: set[str] = set()
         for j in range(item_count):
             item = items.nth(j)
             sku_el = item.locator("div.line-clamp-2:has-text('Seller SKU:')").first
@@ -1088,6 +1089,9 @@ async def scan_order_skus(page: Page) -> None:
                 sku = raw.replace("Seller SKU:", "").strip()
             except Exception:
                 continue
+            if sku in seen_skus:
+                continue
+            seen_skus.add(sku)
             qty_el = item.locator("[data-tid='m4b_input_number']").first
             try:
                 qty = await qty_el.get_attribute("value") or "1"
