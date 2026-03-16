@@ -688,17 +688,17 @@ async def _batch_edit_weight(page: Page, weight: float | None) -> None:
         return
 
     # Wait for the drawer, then clear the input and type the new value.
-    # Using page.keyboard for Select-All + Delete then type triggers real key
-    # events that Vue's v-model picks up (JS setter / fill() both fail).
+    # el.select() selects all text at the DOM level (reliable on Vue spinbuttons
+    # where keyboard shortcuts like Ctrl+A may not work after a programmatic click).
+    # Typing via page.keyboard replaces the selection and triggers Vue's v-model.
     input_selector = "input#packageWeight_input"
     try:
         inp = page.locator(input_selector).first
         await inp.wait_for(state="visible", timeout=10_000)
         await inp.click()
-        await asyncio.sleep(0.1)
-        await page.keyboard.press("Control+a")
-        await page.keyboard.press("Delete")
         await asyncio.sleep(0.2)
+        await inp.evaluate("el => el.select()")
+        await asyncio.sleep(0.1)
         await page.keyboard.type(str(weight), delay=100)
         # Confirm the value was accepted
         actual = await inp.input_value()
@@ -1146,9 +1146,10 @@ async def scan_order_skus(page: Page) -> None:
         try:
             await weight_input.wait_for(state="visible", timeout=5_000)
             await weight_input.click()
-            await weight_input.press("Control+a")
-            await weight_input.press("Backspace")
-            await weight_input.type("1", delay=50)
+            await asyncio.sleep(0.2)
+            await weight_input.evaluate("el => el.select()")
+            await asyncio.sleep(0.1)
+            await page.keyboard.type("1", delay=50)
             actual = await weight_input.input_value()
             print(f"  Row {i + 1}: weight set to {actual!r}")
         except Exception as e:
