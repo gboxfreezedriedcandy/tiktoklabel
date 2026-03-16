@@ -834,12 +834,12 @@ async def navigate_to_awaiting_shipment(
     else:
         print("No combine orders modal appeared. Proceeding normally.")
 
-    if mode != "mixed-orders":
-        await _wait_for_shipment_page_and_select_all(page)
-        await _click_bulk_select_all_if_present(page)
     if mode == "mixed-orders":
+        await _wait_for_shipment_page(page)
         await scan_order_skus(page)
     else:
+        await _wait_for_shipment_page_and_select_all(page)
+        await _click_bulk_select_all_if_present(page)
         await _batch_edit_weight(page, weight)
     await _print_document(page)
 
@@ -881,19 +881,11 @@ SHIPMENT_PAGE_SELECT_ALL_SELECTORS = [
 ]
 
 
-async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
-    """
-    After the 'Arrange shipment' button is clicked, wait for the new page to
-    finish loading, then click the select-all checkbox in the shipment table.
-
-    Uses the same robust multi-strategy approach as _click_select_all_checkbox
-    to handle TikTok's custom checkbox components that resist simple clicks.
-    """
+async def _wait_for_shipment_page(page: Page) -> None:
+    """Wait for the shipment page to load and rows to populate."""
     print("Waiting for shipment page to load...")
-    # The arrange-shipment button navigates to a new URL; wait for that navigation
     await page.wait_for_load_state("domcontentloaded")
 
-    # Wait for the table body rows to actually populate (async data load)
     print("Waiting for shipment table rows to populate...")
     try:
         await page.wait_for_selector(
@@ -905,6 +897,17 @@ async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
     except Exception:
         print("Warning: could not confirm table rows; proceeding anyway.")
     await asyncio.sleep(1)  # brief settle after rows appear
+
+
+async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
+    """
+    After the 'Arrange shipment' button is clicked, wait for the new page to
+    finish loading, then click the select-all checkbox in the shipment table.
+
+    Uses the same robust multi-strategy approach as _click_select_all_checkbox
+    to handle TikTok's custom checkbox components that resist simple clicks.
+    """
+    await _wait_for_shipment_page(page)
 
     # Locate the select-all label using the same selectors, with fallbacks
     label: Optional[Locator] = None
