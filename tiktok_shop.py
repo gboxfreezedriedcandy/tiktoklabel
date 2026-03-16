@@ -5,23 +5,30 @@ from pathlib import Path
 from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 
-COOKIES_FILE = Path("cookies.json")
 TIKTOK_SHOP_URL = "https://seller-us.tiktok.com/account/login"
 
 
-async def save_cookies(context: BrowserContext) -> None:
+def _cookies_file(account: str) -> Path:
+    if account == "default":
+        return Path("cookies.json")
+    return Path(f"cookies_{account}.json")
+
+
+async def save_cookies(context: BrowserContext, account: str = "default") -> None:
+    path = _cookies_file(account)
     cookies = await context.cookies()
-    COOKIES_FILE.write_text(json.dumps(cookies, indent=2))
-    print(f"Saved {len(cookies)} cookies to {COOKIES_FILE}")
+    path.write_text(json.dumps(cookies, indent=2))
+    print(f"Saved {len(cookies)} cookies to {path}")
 
 
-async def load_cookies(context: BrowserContext) -> bool:
+async def load_cookies(context: BrowserContext, account: str = "default") -> bool:
     """Load cookies from file into context. Returns True if cookies were loaded."""
-    if not COOKIES_FILE.exists():
+    path = _cookies_file(account)
+    if not path.exists():
         return False
-    cookies = json.loads(COOKIES_FILE.read_text())
+    cookies = json.loads(path.read_text())
     await context.add_cookies(cookies)
-    print(f"Loaded {len(cookies)} cookies from {COOKIES_FILE}")
+    print(f"Loaded {len(cookies)} cookies from {path}")
     return True
 
 
@@ -60,7 +67,7 @@ async def wait_for_captcha_if_present(page: Page) -> None:
             continue
 
 
-async def login(playwright) -> None:
+async def login(playwright, account: str = "default") -> None:
     """Open browser for manual login, then save session cookies."""
     browser = await playwright.chromium.launch(headless=False)
     context = await browser.new_context()
@@ -85,25 +92,25 @@ async def login(playwright) -> None:
     await page.wait_for_load_state("domcontentloaded")
     await asyncio.sleep(2)
 
-    await save_cookies(context)
+    await save_cookies(context, account)
     print("Login complete. Cookies saved.")
     await browser.close()
 
 
-async def get_authenticated_context(playwright) -> tuple[object, BrowserContext, Page]:
+async def get_authenticated_context(playwright, account: str = "default") -> tuple[object, BrowserContext, Page]:
     """
     Return (browser, context, page) with an authenticated session.
     Reuses saved cookies if available, otherwise triggers manual login.
     """
-    has_cookies = await _try_cookies_exist()
+    has_cookies = await _try_cookies_exist(account)
 
     if not has_cookies:
-        print("No saved cookies found. Starting fresh login...")
-        await login(playwright)
+        print(f"No saved cookies found for account '{account}'. Starting fresh login...")
+        await login(playwright, account)
 
     browser = await playwright.chromium.launch(headless=False)
     context = await browser.new_context()
-    await load_cookies(context)
+    await load_cookies(context, account)
     page = await context.new_page()
 
     print("Resuming session with saved cookies...")
@@ -114,11 +121,11 @@ async def get_authenticated_context(playwright) -> tuple[object, BrowserContext,
     if "login" in page.url or "passport" in page.url:
         print("Saved cookies expired. Triggering fresh login...")
         await browser.close()
-        await login(playwright)
+        await login(playwright, account)
 
         browser = await playwright.chromium.launch(headless=False)
         context = await browser.new_context()
-        await load_cookies(context)
+        await load_cookies(context, account)
         page = await context.new_page()
         await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
         await asyncio.sleep(2)
@@ -126,8 +133,8 @@ async def get_authenticated_context(playwright) -> tuple[object, BrowserContext,
     return browser, context, page
 
 
-async def _try_cookies_exist() -> bool:
-    return COOKIES_FILE.exists()
+async def _try_cookies_exist(account: str = "default") -> bool:
+    return _cookies_file(account).exists()
 
 
 ORDERS_URL = "https://seller-us.tiktok.com/order"
@@ -1177,10 +1184,12 @@ async def main():
     parser.add_argument("--mode", default="single-order",
                         choices=["single-order", "mixed-orders", "combine-orders"],
                         help="Order processing mode (default: single-order)")
+    parser.add_argument("--account", default="default",
+                        help="Account name to use for login (determines which cookies file to load, e.g. 'foo' → cookies_foo.json)")
     args = parser.parse_args()
 
     async with async_playwright() as playwright:
-        browser, context, page = await get_authenticated_context(playwright)
+        browser, context, page = await get_authenticated_context(playwright, args.account)
         print(f"Current URL: {page.url}")
 
         if args.mode == "combine-orders":
