@@ -2,7 +2,7 @@ import argparse
 import json
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 
 COOKIES_FILE = Path("cookies.json")
@@ -215,20 +215,32 @@ PRODUCT_SKU = "G-BOX-FD-STRAWBERRY-SHOTCAKE-M"
 COMBINE_CONFIRM_BUTTON_SELECTORS = [
     "button[data-id='fulfillment.combine_package.confirm_all_combination']",
     "button[data-log_click_for='accept_all_combination']",
-    "//button[.//span[normalize-space()='Combine orders and continue']]",
+    "//button[.//span[contains(normalize-space(),'ombine') and contains(normalize-space(),'and continue')]]",
 ]
 
+REFRESH_ORDERS_SELECTOR = "button[data-log_click_for='refresh_orders']"
 
-async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
+
+async def _click_refresh_orders_button(page: Page) -> None:
+    """Click the refresh orders button and wait for the page to settle."""
+    try:
+        btn = page.locator(REFRESH_ORDERS_SELECTOR).first
+        await btn.wait_for(state="visible", timeout=10_000)
+        await btn.click()
+        print("Refresh orders button clicked.")
+        await asyncio.sleep(3)  # wait for orders to reload after combining
+    except Exception as e:
+        print(f"Warning: could not click refresh orders button: {e}")
+
+
+async def handle_combine_orders_modal(page: Page, timeout: float = 15.0) -> bool:
     """
-    Return True only if the Combine Orders modal was actually present and acted upon.
+    Check for the Combine Orders modal and handle it if present.
 
-    Polls for the "Combine orders and continue" confirm button for up to `timeout`
-    seconds.  When found, scrolls to it and tries several click strategies
-    (normal click → JS click → Space key → MouseEvent dispatch).  Returns True
-    as soon as the button disappears after a click, meaning the modal was
-    successfully dismissed.  Returns the last value of `seen` (True if the
-    button was ever visible) if the timeout expires before the modal clears.
+    Polls for the "Accept all X combinations and continue" button for up to
+    `timeout` seconds. When found, clicks it, waits for combining to finish,
+    then clicks the refresh orders button. Returns True if the modal was found
+    and handled, False otherwise.
     """
     import time as _time
 
@@ -248,7 +260,7 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
                 continue
 
         if btn is None:
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.3)
             continue
 
         seen = True
@@ -298,7 +310,7 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
             except Exception:
                 pass
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
 
         # If the button is gone the modal was dismissed — success
         still_visible = False
@@ -312,10 +324,79 @@ async def handle_combine_orders_modal(page: Page, timeout: float = 8.0) -> bool:
                 continue
 
         if not still_visible:
-            print("Combine Orders modal dismissed.")
+            print("Combine Orders modal dismissed. Waiting for combining to finish...")
+            await asyncio.sleep(3)  # wait for combining to complete
+            await _click_refresh_orders_button(page)
             return True
 
     return seen
+
+
+async def _set_page_size(page: Page, size: int) -> None:
+    """Change the pagination page-size dropdown to the given value (e.g. 50)."""
+    combobox = page.locator('.core-pagination-option [role="combobox"]')
+    await combobox.wait_for(state="visible", timeout=10_000)
+
+    # Grab a handle to the first existing row so we can detect when the table
+    # unmounts and re-mounts with the new page size.
+    first_row = page.locator("table tbody tr").first
+    old_row_handle = None
+    try:
+        old_row_handle = await first_row.element_handle(timeout=3_000)
+    except Exception:
+        pass  # no rows yet — nothing to wait for detachment on
+
+    await combobox.click()
+    await asyncio.sleep(1)
+    # Resolve popup container from aria-controls, then find the option by text.
+    popup_id = await combobox.get_attribute("aria-controls")
+    if popup_id:
+        option = page.locator(f"#{popup_id}").get_by_text(f"{size}/Page", exact=True)
+    else:
+        option = page.get_by_text(f"{size}/Page", exact=True).last
+    await option.wait_for(state="visible", timeout=8_000)
+    await option.click()
+    print(f"Page size set to {size}. Waiting for table to refresh...")
+
+    # Wait for the old row to detach (table teardown), then for new rows to appear.
+    if old_row_handle:
+        try:
+            await page.wait_for_function(
+                "el => !el.isConnected", arg=old_row_handle, timeout=10_000
+            )
+            print("Old rows detached — table is refreshing.")
+        except Exception:
+            pass  # may already be gone or same DOM reused
+
+    await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
+    print(f"Table reloaded with {size}/page.")
+
+
+async def _apply_shipping_method_filter(page: Page, shipping_method: str) -> None:
+    """Apply only the Shipping Method filter (used by mixed-orders mode)."""
+    filter_btn = page.locator("button", has_text="Filter").first
+    await filter_btn.wait_for(state="visible", timeout=15_000)
+    await filter_btn.click()
+    print("Filter panel opened.")
+    await asyncio.sleep(1)
+
+    shipping_combobox = page.locator(
+        '[data-log_click_for="filter_select"][data-log_json*="fulfillment_type_v2_comp_us"] [role="combobox"]'
+    )
+    await shipping_combobox.wait_for(state="visible", timeout=8_000)
+    await shipping_combobox.click()
+    await asyncio.sleep(0.5)
+    shipping_option = page.locator(
+        '[data-log_click_for="filter_select_option"]', has_text=shipping_method
+    )
+    await shipping_option.wait_for(state="visible", timeout=8_000)
+    await shipping_option.click()
+    print(f"'{shipping_method}' selected from Shipping Method dropdown.")
+
+    apply_btn = page.locator('[data-log_click_for="apply"]')
+    await apply_btn.wait_for(state="visible", timeout=10_000)
+    await apply_btn.click()
+    print("Filter applied.")
 
 
 async def _apply_product_filter(
@@ -518,23 +599,197 @@ async def _click_select_all_checkbox(page: Page) -> None:
 
 async def _click_bulk_select_all_if_present(page: Page) -> None:
     """
-    After the header checkbox is checked, TikTok may show a 'Select all N orders'
+    After the header checkbox is checked, TikTok may show a 'Select all N packages'
     button (data-log_click_for='bulk_select') when the total exceeds the current
-    page.  Click it if it appears so that ALL orders across pages are selected.
+    page.  Click it if it appears so that ALL packages across pages are selected.
     """
     # Give TikTok a moment to render the bulk-select button after the checkbox change
     await asyncio.sleep(2)
 
-    selector = "button[data-log_click_for='bulk_select'][data-id='fulfillment.table.select_all_package']"
-    try:
-        btn = page.locator(selector).first
-        await btn.wait_for(state="visible", timeout=5_000)
-        total = await btn.get_attribute("data-log_total_cnt") or "?"
-        await btn.click(force=True)
-        print(f"Clicked 'Select all {total} orders' bulk-select button.")
-        await asyncio.sleep(1)  # wait for selection to register
-    except Exception:
+    selectors = [
+        "button[data-log_click_for='bulk_select'][data-id='fulfillment.table.select_all_package']",
+        "button[data-log_click_for='bulk_select']",
+        "//button[.//span[contains(normalize-space(),'Select all') and contains(normalize-space(),'package')]]",
+    ]
+
+    btn = None
+    for selector in selectors:
+        try:
+            is_xpath = selector.startswith("//")
+            loc = page.locator(f"xpath={selector}" if is_xpath else selector).first
+            await loc.wait_for(state="visible", timeout=3_000)
+            btn = loc
+            print(f"Bulk-select-all button found via: {selector!r}")
+            break
+        except Exception:
+            continue
+
+    if btn is None:
         print("No bulk-select-all button found; current page selection is sufficient.")
+        return
+
+    total = await btn.get_attribute("data-log_total_cnt") or "?"
+    handle = await btn.element_handle()
+
+    strategies: list[tuple[str, Any]] = [
+        ("direct click",       lambda: btn.click(timeout=5_000)),
+        ("force click",        lambda: btn.click(force=True, timeout=5_000)),
+        ("JS click",           lambda: page.evaluate("el => el.click()", handle)),
+        ("dispatch click",     lambda: page.evaluate(
+            "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}))", handle
+        )),
+    ]
+
+    for name, strategy in strategies:
+        try:
+            await strategy()
+            await asyncio.sleep(0.5)
+            print(f"Clicked 'Select all {total} packages' via: {name}")
+            await asyncio.sleep(1)
+            return
+        except Exception as exc:
+            print(f"Bulk-select strategy '{name}' failed: {exc}")
+            continue
+
+    print("Warning: could not click bulk-select-all button after all strategies.")
+
+
+async def _batch_edit_weight(page: Page, weight: float | None) -> None:
+    """Click 'Edit weight', set the weight value, and click Apply.
+    Skips silently if weight is None or the button is not found."""
+    if weight is None:
+        return
+
+    edit_btn_selector = "button[data-log_click_for='4pl_batch_edit_weight_all_package_info']"
+    try:
+        btn = page.locator(edit_btn_selector).first
+        await btn.wait_for(state="visible", timeout=10_000)
+        await btn.click()
+        print(f"Edit weight button clicked. Setting weight to {weight}.")
+    except Exception as e:
+        print(f"Warning: could not click Edit weight button: {e}")
+        return
+
+    # Wait for the drawer, then clear the input and type the new value.
+    # Using click + Ctrl+A + keyboard type triggers real key events that
+    # Vue's v-model picks up (JS setter / fill() both fail on this component).
+    input_selector = "input#packageWeight_input"
+    try:
+        inp = page.locator(input_selector).first
+        await inp.wait_for(state="visible", timeout=10_000)
+        await inp.click()
+        await inp.press("Control+a")
+        await inp.press("Backspace")
+        await inp.type(str(weight), delay=50)
+        # Confirm the value was accepted
+        actual = await inp.input_value()
+        print(f"Weight input value after typing: {actual!r}")
+    except Exception as e:
+        print(f"Warning: could not set weight value: {e}")
+        return
+
+    # Click the Apply button
+    apply_selector = "button[data-log_click_for='bulk_edit_weight_amending_apply']"
+    try:
+        apply_btn = page.locator(apply_selector).first
+        await apply_btn.wait_for(state="visible", timeout=10_000)
+        await apply_btn.click()
+        print("Apply clicked for batch weight edit.")
+        await asyncio.sleep(2)
+    except Exception as e:
+        print(f"Warning: could not click Apply for weight edit: {e}")
+
+
+async def _print_document(page: Page) -> None:
+    """
+    Click 'Print document', open the edit drawer, ensure Shipping label and
+    Packing slip are checked, then confirm.
+    """
+    # 1. Click the Print document button
+    print_btn = page.locator("[data-id='fulfillment.create_shipping_label.print_document']").first
+    try:
+        await print_btn.wait_for(state="visible", timeout=15_000)
+        await print_btn.click()
+        print("Clicked 'Print document'.")
+    except Exception as e:
+        print(f"Warning: could not click Print document: {e}")
+        return
+
+    # 2. Wait for the popover and click Edit
+    edit_btn = page.locator("[data-id='fulfillment.create_shipping_label.print_document_edit']").first
+    try:
+        await edit_btn.wait_for(state="visible", timeout=10_000)
+        await edit_btn.click()
+        print("Clicked 'Edit' in print document popover.")
+    except Exception as e:
+        print(f"Warning: could not click Edit in print popover: {e}")
+        return
+
+    # 3. Wait for the drawer
+    drawer = page.locator(".core-drawer-inner").first
+    try:
+        await drawer.wait_for(state="visible", timeout=10_000)
+    except Exception as e:
+        print(f"Warning: print settings drawer did not appear: {e}")
+        return
+
+    # 4. Ensure Shipping label and Packing slip checkboxes are checked
+    for data_id, label in [
+        ("fulfillment.print_document.selection.shipping_label", "Shipping label"),
+        ("fulfillment.print_document.selection.packing_slip", "Packing slip"),
+    ]:
+        cb_label = page.locator(f"label[data-id='{data_id}']").first
+        cb_input = cb_label.locator("input[type='checkbox']").first
+        try:
+            await cb_input.wait_for(state="attached", timeout=5_000)
+            is_checked = await cb_input.is_checked()
+            if not is_checked:
+                await cb_label.click()
+                print(f"Checked '{label}'.")
+            else:
+                print(f"'{label}' already checked.")
+        except Exception as e:
+            print(f"Warning: could not check '{label}': {e}")
+
+    # 5. Click Confirm
+    confirm_btn = page.locator("button[data-log_click_for='select_print_document_drawer_confirm']").first
+    try:
+        await confirm_btn.wait_for(state="visible", timeout=5_000)
+        await confirm_btn.click()
+        print("Clicked Confirm on print settings drawer.")
+    except Exception as e:
+        print(f"Warning: could not click Confirm on print settings: {e}")
+
+
+async def combine_orders_mode(page: Page) -> None:
+    """
+    combine-orders mode: no filters, select all, arrange shipment,
+    handle combine popup if it appears, then wait for the next page.
+    """
+    print("combine-orders mode: navigating to orders page...")
+    await page.goto(ORDERS_URL, wait_until="domcontentloaded")
+    await asyncio.sleep(4)
+
+    await _click_select_all_checkbox(page)
+    await _click_bulk_select_all_if_present(page)
+    await _click_arrange_shipment_button(page)
+
+    combined = await handle_combine_orders_modal(page, timeout=15.0)
+    if combined:
+        print("Orders combined. Waiting for shipment page...")
+    else:
+        print("No combine modal. Waiting for shipment page...")
+
+    await page.wait_for_load_state("domcontentloaded")
+    try:
+        await page.wait_for_selector(
+            "table[data-table-component='true'] tbody tr",
+            state="visible",
+            timeout=30_000,
+        )
+        print("Shipment page loaded.")
+    except Exception:
+        print("Warning: could not confirm table rows; proceeding anyway.")
 
 
 async def navigate_to_awaiting_shipment(
@@ -543,28 +798,50 @@ async def navigate_to_awaiting_shipment(
     order_contents: str,
     shipping_method: str,
     combine_split: str,
+    weight: float | None = None,
+    mode: str = "single-order",
 ) -> None:
     """
-    Navigate to Manage Orders and filter to 'Awaiting shipment' orders
-    for the given product SKU and filter values.
+    Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
 
-    Steps:
-      1. Go to the orders page.
-      2. Click the Filter button and filter by product SKU.
-      3. Click the select-all checkbox to select all visible rows.
+    mode='single-order': applies all filters; clicks bulk-select-all on both pages.
+    mode='mixed-orders': applies only shipping_method filter; skips bulk-select-all.
     """
     print(f"Navigating to Manage Orders: {ORDERS_URL}")
     await page.goto(ORDERS_URL, wait_until="domcontentloaded")
     await asyncio.sleep(4)  # wait for JS-rendered page
 
-    await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
-    await asyncio.sleep(2)  # wait for filtered results to load
-    print(f"Filter applied: product={sku}")
+    await _set_page_size(page, 50)
+
+    if mode == "mixed-orders":
+        await _apply_shipping_method_filter(page, shipping_method)
+    else:
+        await _apply_product_filter(page, sku, order_contents, shipping_method, combine_split)
+
+    # Wait for the filtered rows to actually appear before selecting.
+    print("Waiting for filtered rows to appear...")
+    await page.wait_for_selector("table tbody tr", state="visible", timeout=20_000)
+    print("Filtered rows visible.")
 
     await _click_select_all_checkbox(page)
-    await _click_bulk_select_all_if_present(page)
+    if mode != "mixed-orders":
+        await _click_bulk_select_all_if_present(page)
     await _click_arrange_shipment_button(page)
+
+    combined = await handle_combine_orders_modal(page, timeout=15.0)
+    if combined:
+        print("Orders combined. Proceeding to shipment page...")
+    else:
+        print("No combine orders modal appeared. Proceeding normally.")
+
     await _wait_for_shipment_page_and_select_all(page)
+    if mode != "mixed-orders":
+        await _click_bulk_select_all_if_present(page)
+    if mode == "mixed-orders":
+        await scan_order_skus(page)
+    else:
+        await _batch_edit_weight(page, weight)
+    await _print_document(page)
 
 
 ARRANGE_SHIPMENT_SELECTORS = [
@@ -739,6 +1016,136 @@ async def _wait_for_shipment_page_and_select_all(page: Page) -> None:
     )
 
 
+async def scan_order_skus(page: Page) -> None:
+    """
+    For each row in the current orders table, hover over the order-ID cell to
+    trigger the product-info popover, extract the 'Seller SKU:' value, then
+    print all SKUs to the console.
+    """
+    rows = page.locator("table tbody tr")
+    count = await rows.count()
+    print(f"Found {count} rows. Scanning SKUs...")
+
+    skus: list[list[tuple[str, str]]] = []
+    for i in range(count):
+        row = rows.nth(i)
+        trigger = row.locator("[data-log_click_for='cell_product']").first
+        try:
+            await trigger.scroll_into_view_if_needed()
+            await trigger.click()
+        except Exception as e:
+            print(f"Row {i}: could not click product cell: {e}")
+            skus.append([("(click failed)", "")])
+            continue
+
+        # Wait for the product popover
+        popover = page.locator("[data-log_module_name='product_edit_popover']").first
+        try:
+            await popover.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            print(f"Row {i}: popover did not appear.")
+            skus.append([("(no popover)", "")])
+            continue
+
+        # Each product row contains a 'Seller SKU:' element.
+        # core-space-item also matches image/qty/other divs, so only process
+        # items that actually contain a 'Seller SKU:' element.
+        items = popover.locator("div[data-tid='m4b_space'] > div.core-space-item")
+        item_count = await items.count()
+        order_skus: list[tuple[str, str]] = []
+        for j in range(item_count):
+            item = items.nth(j)
+            sku_el = item.locator("div.line-clamp-2:has-text('Seller SKU:')").first
+            if await sku_el.count() == 0:
+                continue
+            try:
+                raw = await sku_el.inner_text()
+                sku = raw.replace("Seller SKU:", "").strip()
+            except Exception:
+                continue
+            qty_el = item.locator("[data-tid='m4b_input_number']").first
+            try:
+                qty = await qty_el.get_attribute("value") or "1"
+            except Exception:
+                qty = "1"
+            order_skus.append((sku, qty))
+        skus.append(order_skus)
+
+        print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
+
+        # Close the product popover by clicking the trigger cell again (toggle),
+        # then wait for it to disappear before interacting with the weight cell.
+        try:
+            await trigger.click()
+            await popover.wait_for(state="hidden", timeout=2_000)
+        except Exception:
+            pass
+
+        # Click the weight edit icon using multiple strategies until the popover opens.
+        weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
+        edit_icon = page.locator("svg.theme-arco-icon-edit").first
+
+        async def _weight_popover_visible() -> bool:
+            try:
+                await weight_popover.wait_for(state="visible", timeout=1_500)
+                return True
+            except Exception:
+                return False
+
+        weight_opened = False
+        for _strategy in ("force", "js", "dispatch"):
+            try:
+                if _strategy == "force":
+                    await edit_icon.click(force=True)
+                elif _strategy == "js":
+                    handle = await edit_icon.element_handle()
+                    if handle:
+                        await page.evaluate("el => el.click()", handle)
+                else:
+                    handle = await edit_icon.element_handle()
+                    if handle:
+                        await page.evaluate(
+                            "el => el.dispatchEvent(new MouseEvent('click',"
+                            " {bubbles:true,cancelable:true,view:window}))",
+                            handle,
+                        )
+            except Exception:
+                pass
+            if await _weight_popover_visible():
+                weight_opened = True
+                break
+
+        if not weight_opened:
+            print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
+            continue
+
+        # Set the weight to 1 using the same key-event approach that works for
+        # Vue-controlled inputs (fill() / JS setter do not trigger v-model).
+        weight_input = weight_popover.locator("input#packageWeight_input").first
+        try:
+            await weight_input.wait_for(state="visible", timeout=5_000)
+            await weight_input.click()
+            await weight_input.press("Control+a")
+            await weight_input.press("Backspace")
+            await weight_input.type("1", delay=50)
+            actual = await weight_input.input_value()
+            print(f"  Row {i + 1}: weight set to {actual!r}")
+        except Exception as e:
+            print(f"  Row {i + 1}: warning — could not set weight: {e}")
+            continue
+
+        # Confirm the value (Enter closes/saves the inline popover).
+        await weight_input.press("Enter")
+        await asyncio.sleep(0.5)
+
+    print("\n=== SKUs found ===")
+    for idx, order_skus in enumerate(skus, 1):
+        print(f"  Order {idx:>3}:")
+        for sku, qty in order_skus:
+            print(f"             {sku}  x{qty}")
+    print(f"Total orders: {len(skus)}")
+
+
 async def get_awaiting_shipment_order_ids(page: Page) -> list[str]:
     """
     Return a list of order IDs currently visible on the filtered orders page.
@@ -766,15 +1173,25 @@ async def main():
                         help="Shipping Method filter value (default: 'TikTok Shipping (Upgraded)')")
     parser.add_argument("--combine-split", default="Original", dest="combine_split",
                         help="Order combine/split filter value (default: 'Original')")
+    parser.add_argument("--weight", type=float, default=None, dest="weight",
+                        help="Package weight in kg to set (e.g. 0.65)")
+    parser.add_argument("--mode", default="single-order",
+                        choices=["single-order", "mixed-orders", "combine-orders"],
+                        help="Order processing mode (default: single-order)")
     args = parser.parse_args()
 
     async with async_playwright() as playwright:
         browser, context, page = await get_authenticated_context(playwright)
         print(f"Current URL: {page.url}")
 
-        await navigate_to_awaiting_shipment(
-            page, args.sku, args.order_contents, args.shipping_method, args.combine_split
-        )
+        if args.mode == "combine-orders":
+            await combine_orders_mode(page)
+        else:
+            await navigate_to_awaiting_shipment(
+                page, args.sku, args.order_contents, args.shipping_method, args.combine_split,
+                weight=args.weight,
+                mode=args.mode,
+            )
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
 
