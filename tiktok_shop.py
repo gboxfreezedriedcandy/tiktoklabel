@@ -1371,6 +1371,8 @@ async def main():
 
         if args.mode == "combine-orders":
             await combine_orders_mode(page)
+            await save_cookies(context, args.account)
+            print("Session cookies refreshed and saved.")
             print("Done. Closing browser.")
             await browser.close()
             return
@@ -1381,6 +1383,8 @@ async def main():
                 mode=args.mode,
                 do_print=args.do_print == "yes",
             )
+        await save_cookies(context, args.account)
+        print("Session cookies refreshed and saved.")
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
 
