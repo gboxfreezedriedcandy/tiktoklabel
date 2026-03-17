@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import asyncio
 from datetime import date
@@ -898,7 +899,22 @@ async def _click_buy_and_print(page: Page, sku: str) -> None:
         pdf_url = pdf_page.url
         print(f"PDF tab opened: {pdf_url}")
         filename = f"{sku}_{date.today().strftime('%Y%m%d')}.pdf"
-        pdf_bytes = await pdf_page.pdf()
+        if pdf_url.startswith("blob:"):
+            b64: str = await pdf_page.evaluate("""async (url) => {
+                const resp = await fetch(url);
+                const buf = await resp.arrayBuffer();
+                const bytes = new Uint8Array(buf);
+                let binary = '';
+                const chunk = 8192;
+                for (let i = 0; i < bytes.length; i += chunk) {
+                    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+                }
+                return btoa(binary);
+            }""", pdf_url)
+            pdf_bytes = base64.b64decode(b64)
+        else:
+            response = await pdf_page.context.request.get(pdf_url)
+            pdf_bytes = await response.body()
         Path(filename).write_bytes(pdf_bytes)
         print(f"Saved PDF as '{filename}'.")
         await pdf_page.close()
