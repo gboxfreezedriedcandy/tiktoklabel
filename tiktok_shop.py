@@ -1221,19 +1221,19 @@ async def scan_order_skus(page: Page) -> None:
         raw_items: list[list[str]] = await popover.evaluate("""el => {
             const seen = new Set();
             const out = [];
-            el.querySelectorAll("div[data-tid='m4b_space'] > div.core-space-item").forEach(item => {
-                const skuEl = item.querySelector("div.line-clamp-2");
-                if (!skuEl) return;
+            el.querySelectorAll("div.line-clamp-2").forEach(skuEl => {
                 const txt = skuEl.innerText || '';
                 if (!txt.includes('Seller SKU:')) return;
                 const sku = txt.replace('Seller SKU:', '').trim();
                 if (!sku || seen.has(sku)) return;
                 seen.add(sku);
-                const qtyWrapper = item.querySelector("[data-tid='m4b_input_number']");
-                const qtyEl = qtyWrapper
-                    ? (qtyWrapper.tagName === 'INPUT' ? qtyWrapper : qtyWrapper.querySelector('input'))
+                // The qty <input> lives in a sibling div next to <main>.
+                // closest('main') reaches <main>, .parentElement is their common parent.
+                const mainEl = skuEl.closest('main');
+                const qtyInput = mainEl
+                    ? mainEl.parentElement.querySelector('input[data-tid="m4b_input_number"]')
                     : null;
-                out.push([sku, qtyEl ? (qtyEl.value || '1') : '1']);
+                out.push([sku, qtyInput ? (qtyInput.value || '1') : '1']);
             });
             return out;
         }""")
