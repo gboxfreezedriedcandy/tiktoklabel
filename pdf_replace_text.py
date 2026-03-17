@@ -109,12 +109,16 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
                     previous_page = ""
                     for sku, qty_str in slip_items:
                         sku_norm = _norm(sku)
+                        order_qty_text = '(' + qty_str + ')' if int(qty_str) > 1 else qty_str
+                        matched = False
                         for key_norm, old_text, new_text in norm_map:
                             if key_norm not in sku_norm:
                                 continue
-                            order_qty_text = '(' + qty_str + ')' if int(qty_str) > 1 else qty_str
                             translated_lines.append(order_qty_text + ' X ' + new_text)
+                            matched = True
                             break
+                        if not matched:
+                            translated_lines.append(order_qty_text + ' X ' + '没有翻译')
 
                 # --- Strategy 2: legacy QTY...QTY flat-text parser (fallback) ---
                 if not translated_lines:
@@ -136,6 +140,7 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
 
                             for item in orders:
                                 item_norm = _norm(item)
+                                matched = False
                                 for key_norm, old_text, new_text in norm_map:
                                     if key_norm not in item_norm:
                                         continue
@@ -145,7 +150,13 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
                                     order_qty = qty_match.group(1)
                                     order_qty_text = '(' + order_qty + ')' if order_qty.isdigit() and int(order_qty) > 1 else order_qty
                                     translated_lines.append(order_qty_text + ' X ' + new_text)
+                                    matched = True
                                     break
+                                if not matched:
+                                    qty_match = re.search(r'(\d+)', item_norm)
+                                    order_qty = qty_match.group(1) if qty_match else '?'
+                                    order_qty_text = '(' + order_qty + ')' if order_qty.isdigit() and int(order_qty) > 1 else order_qty
+                                    translated_lines.append(order_qty_text + ' X ' + '没有翻译')
                         else:
                             if previous_page == "":
                                 previous_page = flat
