@@ -118,6 +118,12 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
                 # retry without requiring the 'Packing Slip' / 'SELLER SKU' headers.
                 if not slip_items and packing_slip_continuation:
                     slip_items = parse_packing_slip(text, debug=debug, continuation=True)
+                # Strategy 1c: shipping-label format — has an exact 'Seller SKU' line
+                # but no 'Packing Slip' header.  continuation=True handles split SKUs.
+                if not slip_items:
+                    _ul = [l.strip().upper() for l in text.split('\n')]
+                    if any(l == 'SELLER SKU' for l in _ul):
+                        slip_items = parse_packing_slip(text, debug=debug, continuation=True)
                 if slip_items:
                     packing_slip_continuation = True
                     previous_page = ""
