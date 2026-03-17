@@ -3,67 +3,100 @@ import re
 import sys
 
 
+def _norm(s):
+    return re.sub(r'[-\s]+', '', s)
+
+
 def extract_sku_qty(pdf_path):
     """
-    Extract Seller SKU and Qty from a TikTok packing slip PDF.
-    Also prints raw extracted text per page for debugging.
-
-    Returns a list of (sku, qty) tuples found.
+    Diagnostic tool for TikTok packing slip PDFs.
+    Focuses on the Packing Slip page and shows exactly what PyPDF2 extracts
+    so the parser in pdf_replace_text.py can be tuned to match.
     """
-    results = []
-
     with open(pdf_path, 'rb') as f:
         reader = PyPDF2.PdfReader(f)
+        total = len(reader.pages)
+        print(f"Total pages: {total}\n")
 
         for page_num, page in enumerate(reader.pages, start=1):
-            raw = page.extract_text()
-            if not raw:
-                continue
+            raw = page.extract_text() or ""
+            upper = raw.upper()
 
-            print(f"\n========== PAGE {page_num} RAW TEXT ==========")
+            is_packing_slip = "PACKING SLIP" in upper
+            print(f"{'='*60}")
+            print(f"PAGE {page_num}  {'<<< PACKING SLIP >>>' if is_packing_slip else '(not packing slip)'}")
+            print(f"{'='*60}")
+
+            # --- 1. Raw text with newlines preserved ---
+            print("\n[1] RAW TEXT (newlines preserved):")
             print(raw)
-            print(f"========== PAGE {page_num} NORMALIZED (newlines removed) ==========")
-            normalized = raw.replace("\n", " ").upper()
-            print(normalized)
 
-            # Strategy 1: Find Seller SKU label followed by the SKU value
-            # TikTok packing slips label this column "Seller SKU"
-            sku_matches = re.findall(r'SELLER\s+SKU[:\s]+([A-Z0-9][A-Z0-9\-]+)', normalized)
-            if sku_matches:
-                print(f"\n[Strategy 1 - Seller SKU label] Found: {sku_matches}")
+            # --- 2. Line-by-line with highlights ---
+            print("\n[2] LINE-BY-LINE (lines with G-BOX / QTY / SELLER SKU highlighted):")
+            for i, line in enumerate(raw.split('\n')):
+                tag = ""
+                u = line.upper()
+                if 'G-BOX' in u:
+                    tag = " <<< G-BOX"
+                elif 'QTY' in u:
+                    tag = " <<< QTY"
+                elif 'SELLER SKU' in u:
+                    tag = " <<< SELLER SKU"
+                print(f"  {i:3d}: {line!r}{tag}")
 
-            # Strategy 2: Find QTY...QTY block (existing approach)
-            qty_block = re.search(r'QTY(.*?)QTY', normalized, re.DOTALL)
-            if qty_block:
-                block = qty_block.group(1)
-                print(f"\n[Strategy 2 - QTY block] Content: {block!r}")
-                # Extract G-BOX SKUs and their trailing numbers
-                sku_qty_pairs = re.findall(r'(G-BOX[A-Z0-9\-]+?)\s*(\d+)\b', block)
-                print(f"[Strategy 2] SKU+Qty pairs: {sku_qty_pairs}")
+            # --- 3. Simulate existing pdf_replace_text.py logic ---
+            print("\n[3] EXISTING PARSER SIMULATION (newlines removed, uppercased):")
+            flat = raw.replace("\n", "").upper()
+            print(f"  flat text: {flat[:300]}{'...' if len(flat)>300 else ''}")
 
-            # Strategy 3: Scan all G-BOX-like tokens
-            all_gbox = re.findall(r'G-BOX[A-Z0-9\-]+', normalized)
-            if all_gbox:
-                print(f"\n[Strategy 3 - all G-BOX tokens] {all_gbox}")
+            found = re.search(r'QTY(.*)QTY', flat)
+            if found:
+                region = found.group(1)
+                print(f"\n  QTY...QTY region: {region!r}")
+                orders = region.split("G-BOX ")
+                if orders and orders[0] == "":
+                    orders.pop(0)
+                print(f"\n  After split('G-BOX '): {orders}")
+                for item in orders:
+                    item_norm = _norm(item)
+                    print(f"\n    item      : {item!r}")
+                    print(f"    item_norm : {item_norm!r}")
+            else:
+                print("  *** QTY...QTY pattern NOT FOUND in flat text ***")
 
-            # Strategy 4: Look for lines with SKU + digit at end
-            for line in raw.upper().split('\n'):
-                m = re.match(r'\s*(G-BOX[A-Z0-9\-]+)\s+(\d+)\s*$', line.strip())
-                if m:
-                    sku, qty = m.group(1), m.group(2)
-                    print(f"\n[Strategy 4 - line scan] SKU={sku}  QTY={qty}")
-                    results.append((sku, qty))
+            # --- 4. Seller SKU column approach ---
+            print("\n[4] SELLER SKU COLUMN APPROACH:")
+            lines = raw.split('\n')
+            in_sku_section = False
+            for i, line in enumerate(lines):
+                u = line.upper().strip()
+                if 'SELLER SKU' in u and 'QTY' in u:
+                    in_sku_section = True
+                    print(f"  Found header row at line {i}: {line!r}")
+                    continue
+                if in_sku_section:
+                    if re.search(r'TOTAL\s*QTY', u) or re.search(r'TOTAL\s*:\s*\d', u):
+                        print(f"  End of items at line {i}: {line!r}")
+                        in_sku_section = False
+                        continue
+                    gbox = re.search(r'(G-BOX[A-Z0-9\-]+)', line.upper())
+                    qty = re.search(r'\b(\d+)\s*$', line.strip())
+                    print(f"  Row {i}: {line!r}  =>  SKU={gbox.group(1) if gbox else 'NOT FOUND'}  QTY={qty.group(1) if qty else 'NOT FOUND'}")
 
-    return results
+            # --- 5. All G-BOX tokens found anywhere on page ---
+            all_gbox = re.findall(r'G-BOX[A-Z0-9\-]+', upper)
+            print(f"\n[5] ALL G-BOX TOKENS ON PAGE: {all_gbox}")
+
+            # --- 6. All lines ending with a digit (likely qty column) ---
+            print("\n[6] LINES ENDING WITH A DIGIT (candidate qty rows):")
+            for i, line in enumerate(raw.split('\n')):
+                if re.search(r'\d\s*$', line.strip()) and line.strip():
+                    print(f"  {i:3d}: {line!r}")
+
+            print()
 
 
 if __name__ == "__main__":
     path = sys.argv[1] if len(sys.argv) > 1 else "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M_20260316.pdf"
     print(f"Reading: {path}\n")
-    found = extract_sku_qty(path)
-    print("\n========== SUMMARY ==========")
-    if found:
-        for sku, qty in found:
-            print(f"  SKU: {sku}  QTY: {qty}")
-    else:
-        print("  No SKU+Qty pairs found via line scan. Check raw text above.")
+    extract_sku_qty(path)
