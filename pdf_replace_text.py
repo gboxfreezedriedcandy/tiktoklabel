@@ -55,8 +55,8 @@ def parse_packing_slip(raw_text, debug=False, continuation=False):
         if line.startswith('ORDER ID:'):
             break
 
-        # Detect start of a G-BOX SKU
-        if line.startswith('G-BOX'):
+        # Detect start of a known SKU prefix (G-BOX or HAKAM)
+        if line.startswith('G-BOX') or line.startswith('HAKAM'):
             sku = line
             # Join continuation lines when the accumulated SKU ends with '-'
             while sku.endswith('-') and i + 1 < len(upper_lines):
