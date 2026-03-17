@@ -8,7 +8,12 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.pagesizes import letter
 import re
 
-def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements):
+def _norm(s):
+    """Normalize SKU for fuzzy matching: strip hyphens and spaces."""
+    return re.sub(r'[-\s]+', '', s)
+
+
+def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=False):
     pdfmetrics.registerFont(TTFont('SimSun', 'simsun.ttf'))  # Replace with the path to your Chinese font file
     """
     Replace text in a PDF file based on a key-value list of text replacements.
@@ -46,24 +51,35 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements):
                     if found:
                         previous_page = ""
                         start_x = 50
-                        #print(found.group(1))
-                        orders = found.group(1).split("G-BOX ")
+                        qty_region = found.group(1)
+                        orders = qty_region.split("G-BOX ")
                         if orders and orders[0] == "":
                             orders.pop(0)
+
+                        if debug:
+                            print("=== RAW TEXT PAGE", count, "===")
+                            print(text)
+                            print("=== QTY REGION ===")
+                            print(qty_region)
+                            print("=== ITEMS ===", orders)
+
+                        # Pre-normalize all replacement keys for fuzzy (hyphen-insensitive) matching
+                        norm_map = [(_norm(k), k, v) for k, v in replacements.items()]
 
                         # Build translated lines first so we can anchor to bottom
                         translated_lines = []
                         for item in orders:
-                            for old_text, new_text in replacements.items():
-                                if old_text in item:
-                                    match = re.search(old_text + r'(\d+)', item)
-                                    if not match:
-                                        continue
-                                    order_qty = match.group(1)
-                                    order_qty_text = order_qty
-                                    if order_qty.isdigit() and int(order_qty) > 1:
-                                        order_qty_text = '(' + order_qty_text + ')'
-                                    translated_lines.append(order_qty_text + ' X ' + new_text)
+                            item_norm = _norm(item)
+                            for key_norm, old_text, new_text in norm_map:
+                                if key_norm not in item_norm:
+                                    continue
+                                qty_match = re.search(re.escape(key_norm) + r'(\d+)', item_norm)
+                                if not qty_match:
+                                    continue
+                                order_qty = qty_match.group(1)
+                                order_qty_text = '(' + order_qty + ')' if order_qty.isdigit() and int(order_qty) > 1 else order_qty
+                                translated_lines.append(order_qty_text + ' X ' + new_text)
+                                break  # first match wins for this item
 
                         if translated_lines:
                             # Use actual page size so overlay aligns with each page
@@ -190,8 +206,12 @@ replacements = {
     "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M":"中香草方块",
     "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L" : "大香草方块",
     "G-BOX-FD-ICECREAMCUBESVANILLA-L" : "大香草方块",
+    "G-BOX-FD-ICE-CREAMCUBES-VANILLA-M": "中香草方块",
+    "G-BOX-FD-ICE-CREAMCUBES-VANILLA-L": "大香草方块",
     "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M":"中巧克力方块",
     "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L":"大巧克力方块",
+    "G-BOX-FD-ICE-CREAMCUBES-CHOCOLATE-M": "中巧克力方块",
+    "G-BOX-FD-ICE-CREAMCUBES-CHOCOLATE-L": "大巧克力方块",
     "G-BOX-CHAMOY-FRETTLES-MEDIUM":"中辣彩虹糖",
     "G-BOX-CHAMOY-FRETTLES-LARGE": "大辣彩虹糖",
     "G-BOX-CHAMOY-MEDIUM":"中辣彩虹糖",
@@ -232,8 +252,12 @@ hakam_replacements = {
     "G-BOX-FD-STRAWBERRY-SHORTCAKE-L":"大草莓雪糕",
     "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M":"中香草方块",
     "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L":"大香草方块",
+    "G-BOX-FD-ICE-CREAMCUBES-VANILLA-M": "中香草方块",
+    "G-BOX-FD-ICE-CREAMCUBES-VANILLA-L": "大香草方块",
     "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M":"中巧克力方块",
     "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L":"大巧克力方块",
+    "G-BOX-FD-ICE-CREAMCUBES-CHOCOLATE-M": "中巧克力方块",
+    "G-BOX-FD-ICE-CREAMCUBES-CHOCOLATE-L": "大巧克力方块",
     "HAKAM-SMALL-ORIGINAL-FRETTLES":"小原味彩虹糖",
     "HAKAM-MEDIUM-ORIGINAL-FRETTLES":"中原味彩虹糖",
     "HAKAM-LARGE-ORIGINAL-FRETTLES":"大原味彩虹糖",
@@ -339,8 +363,12 @@ gboxcandyshop_replacement = {
     "G-BOX-FD-STRAWBERRY-SHORTCAKE-L":"大草莓雪糕雪条",
     "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M":"中香草雪糕方块",
     "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-L":"大香草雪糕方块",
+    "G-BOX-FD-ICE-CREAMCUBES-VANILLA-M": "中香草雪糕方块",
+    "G-BOX-FD-ICE-CREAMCUBES-VANILLA-L": "大香草雪糕方块",
     "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-M":"中巧克力雪糕方块",
     "G-BOX-FD-ICE-CREAM-CUBES-CHOCOLATE-L":"大巧克力雪糕方块",
+    "G-BOX-FD-ICE-CREAMCUBES-CHOCOLATE-M": "中巧克力雪糕方块",
+    "G-BOX-FD-ICE-CREAMCUBES-CHOCOLATE-L": "大巧克力雪糕方块",
     "G-BOX-CHAMOY-MEDIUM":"中辣彩虹糖",
     "G-BOX-CHAMOY-LARGE": "大辣彩虹糖",
     "G-BOX-PEACH-RING" : "大原味桃圈圈糖",
@@ -381,6 +409,8 @@ if __name__ == "__main__":
     parser.add_argument("output", help="Output PDF path")
     parser.add_argument("--store", choices=["gbox", "hakam", "gboxcandyshop"], default="gbox",
                         help="Which replacement dictionary to use (default: gbox)")
+    parser.add_argument("--debug", action="store_true",
+                        help="Print raw extracted text and parsed items per page")
     args = parser.parse_args()
 
     store_map = {
@@ -388,4 +418,4 @@ if __name__ == "__main__":
         "hakam": hakam_replacements,
         "gboxcandyshop": gboxcandyshop_replacement,
     }
-    replace_text_in_pdf(args.input, args.output, store_map[args.store])
+    replace_text_in_pdf(args.input, args.output, store_map[args.store], debug=args.debug)
