@@ -1317,7 +1317,10 @@ async def scan_order_skus(page: Page) -> None:
 
         # Confirm the value (Enter closes/saves the inline popover).
         await weight_input.press("Enter")
-        await asyncio.sleep(0.5)
+        try:
+            await weight_popover.wait_for(state="hidden", timeout=3_000)
+        except Exception:
+            await asyncio.sleep(0.5)
 
     print("\n=== SKUs found ===")
     for idx, order_skus in enumerate(skus, 1):
