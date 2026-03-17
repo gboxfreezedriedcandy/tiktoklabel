@@ -1316,8 +1316,8 @@ async def main():
                         help="Order processing mode (default: single-order)")
     parser.add_argument("--account", default="default",
                         help="Account name to use for login (determines which cookies file to load, e.g. 'foo' → cookies_foo.json)")
-    parser.add_argument("--print", default="yes", choices=["yes", "no"], dest="do_print",
-                        help="Whether to click 'Arrange shipment+print' (default: yes)")
+    parser.add_argument("--print", default="no", choices=["yes", "no"], dest="do_print",
+                        help="Whether to click 'Arrange shipment+print' (default: no)")
     args = parser.parse_args()
 
     async with async_playwright() as playwright:
