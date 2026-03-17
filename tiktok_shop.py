@@ -1,6 +1,7 @@
 import argparse
 import json
 import asyncio
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
@@ -884,15 +885,25 @@ async def _print_document(page: Page) -> None:
         print(f"Warning: could not click Confirm on print settings: {e}")
 
 
-async def _click_buy_and_print(page: Page) -> None:
-    """Click the 'Arrange shipment+print' button to finalise and print labels."""
+async def _click_buy_and_print(page: Page, sku: str) -> None:
+    """Click the 'Arrange shipment+print' button, wait for the PDF tab, and save it."""
     btn = page.locator("[data-id='fulfillment.create_shipping_label.buy_and_print_label']").first
     try:
         await btn.wait_for(state="visible", timeout=15_000)
-        await btn.click()
-        print("Clicked 'Arrange shipment+print'.")
+        async with page.context.expect_page(timeout=30_000) as new_page_info:
+            await btn.click()
+            print("Clicked 'Arrange shipment+print'.")
+        pdf_page = await new_page_info.value
+        await pdf_page.wait_for_load_state("load", timeout=30_000)
+        pdf_url = pdf_page.url
+        print(f"PDF tab opened: {pdf_url}")
+        filename = f"{sku}_{date.today().strftime('%Y%m%d')}.pdf"
+        pdf_bytes = await pdf_page.pdf()
+        Path(filename).write_bytes(pdf_bytes)
+        print(f"Saved PDF as '{filename}'.")
+        await pdf_page.close()
     except Exception as e:
-        print(f"Warning: could not click 'Arrange shipment+print': {e}")
+        print(f"Warning: could not click 'Arrange shipment+print' or save PDF: {e}")
 
 
 async def combine_orders_mode(page: Page) -> None:
@@ -982,7 +993,7 @@ async def navigate_to_awaiting_shipment(
         await _batch_edit_weight(page, weight)
     await _print_document(page)
     if do_print:
-        await _click_buy_and_print(page)
+        await _click_buy_and_print(page, sku)
     else:
         print("Skipping 'Arrange shipment+print' (--print no).")
 
