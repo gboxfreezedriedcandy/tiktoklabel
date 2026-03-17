@@ -1280,6 +1280,24 @@ async def scan_order_skus(page: Page) -> None:
         if total_weight <= 0:
             print(f"  Row {i + 1}: warning — total weight is 0; skipping weight set.")
             continue
+
+        # Add packaging extra based on total item count across all SKUs.
+        # qty 2 → +0.10, qty 3 → +0.25, qty 4-6 → +0.40, qty 7+ → +0.75
+        total_qty = sum(int(float(qty)) for _, qty in order_skus)
+        if total_qty == 2:
+            extra_weight = 0.10
+        elif total_qty == 3:
+            extra_weight = 0.25
+        elif 4 <= total_qty <= 6:
+            extra_weight = 0.40
+        elif total_qty >= 7:
+            extra_weight = 0.75
+        else:
+            extra_weight = 0.0
+        if extra_weight:
+            print(f"  Row {i + 1}: qty={total_qty}, adding extra {extra_weight} kg packaging weight.")
+        total_weight += extra_weight
+
         weight_str = str(round(total_weight, 5)).rstrip("0").rstrip(".")
 
         # Set the weight using key-event approach (fill()/JS setter don't trigger v-model).
