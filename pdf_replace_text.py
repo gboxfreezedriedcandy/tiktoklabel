@@ -13,6 +13,65 @@ def _norm(s):
     return re.sub(r'[-\s]+', '', s)
 
 
+def parse_packing_slip(raw_text, debug=False):
+    """
+    Parse the new TikTok packing slip format (line-based).
+
+    PyPDF2 extracts the table column-by-column with newlines, so a SKU like
+    G-BOX-FD-ICE-CREAM-CUBES-VANILLA-M may span two lines:
+        G-BOX-FD-ICE-CREAM-
+        CUBES-VANILLA-M
+    The qty appears on its own line immediately after the complete SKU.
+
+    Returns a list of (sku_upper, qty_str) tuples, or [] if this is not a
+    packing slip page or no SKUs are found.
+    """
+    if 'Packing Slip' not in raw_text:
+        return []
+
+    lines = raw_text.split('\n')
+    upper_lines = [l.strip().upper() for l in lines]
+
+    # Find the "Seller SKU" header line
+    try:
+        header_idx = next(i for i, l in enumerate(upper_lines) if l == 'SELLER SKU')
+    except StopIteration:
+        return []
+
+    results = []
+    i = header_idx + 1  # start scanning after the header
+    while i < len(upper_lines):
+        line = upper_lines[i]
+
+        # Footer: stop at Order ID line
+        if line.startswith('ORDER ID:'):
+            break
+
+        # Detect start of a G-BOX SKU
+        if line.startswith('G-BOX'):
+            sku = line
+            # Join continuation lines when the accumulated SKU ends with '-'
+            while sku.endswith('-') and i + 1 < len(upper_lines):
+                i += 1
+                sku += upper_lines[i].strip()
+
+            # The next non-empty line after the complete SKU is the qty
+            i += 1
+            while i < len(upper_lines) and not upper_lines[i].strip():
+                i += 1
+            qty_line = upper_lines[i].strip() if i < len(upper_lines) else ''
+            if qty_line.isdigit():
+                if debug:
+                    print(f"[packing_slip] SKU={sku}  QTY={qty_line}")
+                results.append((sku, qty_line))
+                i += 1
+                continue
+
+        i += 1
+
+    return results
+
+
 def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=False):
     pdfmetrics.registerFont(TTFont('SimSun', 'simsun.ttf'))  # Replace with the path to your Chinese font file
     """
@@ -40,88 +99,85 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
             text = page.extract_text()
 
             if text:
-                text = text.replace("\n", "").upper()
-                text = previous_page + text
-                #print(text)
                 print("---------")
-                try:
-                    #print(text)
-                    found = re.search('QTY(.*)QTY', text)
-                    #print(found)
-                    if found:
-                        previous_page = ""
-                        start_x = 50
-                        qty_region = found.group(1)
-                        orders = qty_region.split("G-BOX ")
-                        if orders and orders[0] == "":
-                            orders.pop(0)
+                norm_map = [(_norm(k), k, v) for k, v in replacements.items()]
+                translated_lines = []
 
-                        if debug:
-                            print("=== RAW TEXT PAGE", count, "===")
-                            print(text)
-                            print("=== QTY REGION ===")
-                            print(qty_region)
-                            print("=== ITEMS ===", orders)
+                # --- Strategy 1: new line-based packing slip parser ---
+                slip_items = parse_packing_slip(text, debug=debug)
+                if slip_items:
+                    previous_page = ""
+                    for sku, qty_str in slip_items:
+                        sku_norm = _norm(sku)
+                        for key_norm, old_text, new_text in norm_map:
+                            if key_norm not in sku_norm:
+                                continue
+                            order_qty_text = '(' + qty_str + ')' if int(qty_str) > 1 else qty_str
+                            translated_lines.append(order_qty_text + ' X ' + new_text)
+                            break
 
-                        # Pre-normalize all replacement keys for fuzzy (hyphen-insensitive) matching
-                        norm_map = [(_norm(k), k, v) for k, v in replacements.items()]
+                # --- Strategy 2: legacy QTY...QTY flat-text parser (fallback) ---
+                if not translated_lines:
+                    flat = text.replace("\n", "").upper()
+                    flat = previous_page + flat
+                    try:
+                        found = re.search('QTY(.*)QTY', flat)
+                        if found:
+                            previous_page = ""
+                            qty_region = found.group(1)
+                            orders = qty_region.split("G-BOX ")
+                            if orders and orders[0] == "":
+                                orders.pop(0)
 
-                        # Build translated lines first so we can anchor to bottom
-                        translated_lines = []
-                        for item in orders:
-                            item_norm = _norm(item)
-                            for key_norm, old_text, new_text in norm_map:
-                                if key_norm not in item_norm:
-                                    continue
-                                qty_match = re.search(re.escape(key_norm) + r'(\d+)', item_norm)
-                                if not qty_match:
-                                    continue
-                                order_qty = qty_match.group(1)
-                                order_qty_text = '(' + order_qty + ')' if order_qty.isdigit() and int(order_qty) > 1 else order_qty
-                                translated_lines.append(order_qty_text + ' X ' + new_text)
-                                break  # first match wins for this item
+                            if debug:
+                                print("=== LEGACY PARSER PAGE", count, "===")
+                                print("=== QTY REGION ===", qty_region)
+                                print("=== ITEMS ===", orders)
 
-                        if translated_lines:
-                            # Use actual page size so overlay aligns with each page
-                            try:
-                                page_width = float(getattr(page.mediabox, 'width', page.mediabox.upper_right[0]))
-                                page_height = float(getattr(page.mediabox, 'height', page.mediabox.upper_right[1]))
-                            except Exception:
-                                page_width, page_height = letter  # fallback
+                            for item in orders:
+                                item_norm = _norm(item)
+                                for key_norm, old_text, new_text in norm_map:
+                                    if key_norm not in item_norm:
+                                        continue
+                                    qty_match = re.search(re.escape(key_norm) + r'(\d+)', item_norm)
+                                    if not qty_match:
+                                        continue
+                                    order_qty = qty_match.group(1)
+                                    order_qty_text = '(' + order_qty + ')' if order_qty.isdigit() and int(order_qty) > 1 else order_qty
+                                    translated_lines.append(order_qty_text + ' X ' + new_text)
+                                    break
+                        else:
+                            if previous_page == "":
+                                previous_page = flat
+                    except AttributeError:
+                        pass
 
-                            packet = io.BytesIO()
-                            can = canvas.Canvas(packet, pagesize=(page_width, page_height))
-                            can.setFont('SimSun', 22)
+                # --- Render overlay if we have translations ---
+                if translated_lines:
+                    start_x = 50
+                    try:
+                        page_width = float(getattr(page.mediabox, 'width', page.mediabox.upper_right[0]))
+                        page_height = float(getattr(page.mediabox, 'height', page.mediabox.upper_right[1]))
+                    except Exception:
+                        page_width, page_height = letter
 
-                            # Anchor the entire block at bottom margin; draw upwards
-                            line_height = 20
-                            bottom_margin = 36
-                            start_y = bottom_margin + (len(translated_lines) - 1) * line_height
-                            for idx, translate in enumerate(translated_lines):
-                                y = start_y - idx * line_height
-                                can.drawString(start_x, y, translate)
+                    packet = io.BytesIO()
+                    can = canvas.Canvas(packet, pagesize=(page_width, page_height))
+                    can.setFont('SimSun', 22)
 
-                            can.save()
+                    line_height = 20
+                    bottom_margin = 36
+                    start_y = bottom_margin + (len(translated_lines) - 1) * line_height
+                    for idx, translate in enumerate(translated_lines):
+                        y = start_y - idx * line_height
+                        can.drawString(start_x, y, translate)
 
-                            print(translated_lines[-1])
-                            print(str(count))
-                            packet.seek(0)
-                            new_pdf = PyPDF2.PdfReader(packet)
-                            page.merge_page(new_pdf.pages[0])
-                    else:
-                        if previous_page == "":
-                            previous_page = text
-
-
-
-
-                except AttributeError:
-                    # AAA, ZZZ not found in the original string
-                    found = ''  # apply your error handling
-                # Perform text replacements
-                for old_text, new_text in replacements.items():
-                    text = text.replace(old_text, new_text)
-                    #print(text)
+                    can.save()
+                    print(translated_lines[-1])
+                    print(str(count))
+                    packet.seek(0)
+                    new_pdf = PyPDF2.PdfReader(packet)
+                    page.merge_page(new_pdf.pages[0])
 
             # Add the modified page to the writer
             pdf_writer.add_page(page)
