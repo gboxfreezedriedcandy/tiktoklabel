@@ -13,7 +13,7 @@ def _norm(s):
     return re.sub(r'[-\s]+', '', s)
 
 
-def parse_packing_slip(raw_text, debug=False):
+def parse_packing_slip(raw_text, debug=False, continuation=False):
     """
     Parse the new TikTok packing slip format (line-based).
 
@@ -23,23 +23,31 @@ def parse_packing_slip(raw_text, debug=False):
         CUBES-VANILLA-M
     The qty appears on its own line immediately after the complete SKU.
 
+    When continuation=True the function is called for a page that is a
+    continuation of a multi-page packing slip. In that case the 'Packing Slip'
+    header and 'SELLER SKU' column header may be absent, so both checks are
+    skipped and scanning starts from line 0.
+
     Returns a list of (sku_upper, qty_str) tuples, or [] if this is not a
     packing slip page or no SKUs are found.
     """
-    if 'Packing Slip' not in raw_text:
+    if not continuation and 'Packing Slip' not in raw_text:
         return []
 
     lines = raw_text.split('\n')
     upper_lines = [l.strip().upper() for l in lines]
 
-    # Find the "Seller SKU" header line
-    try:
-        header_idx = next(i for i, l in enumerate(upper_lines) if l == 'SELLER SKU')
-    except StopIteration:
-        return []
+    if continuation:
+        start_idx = 0
+    else:
+        # Find the "Seller SKU" header line
+        try:
+            start_idx = next(i for i, l in enumerate(upper_lines) if l == 'SELLER SKU') + 1
+        except StopIteration:
+            return []
 
     results = []
-    i = header_idx + 1  # start scanning after the header
+    i = start_idx  # start scanning after the header (or from top on continuation)
     while i < len(upper_lines):
         line = upper_lines[i]
 
@@ -47,8 +55,8 @@ def parse_packing_slip(raw_text, debug=False):
         if line.startswith('ORDER ID:'):
             break
 
-        # Detect start of a G-BOX SKU
-        if line.startswith('G-BOX'):
+        # Detect start of a known SKU prefix (G-BOX or HAKAM)
+        if line.startswith('G-BOX') or line.startswith('HAKAM'):
             sku = line
             # Join continuation lines when the accumulated SKU ends with '-'
             while sku.endswith('-') and i + 1 < len(upper_lines):
@@ -92,6 +100,7 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
 
         # Loop through each page in the PDF
         previous_page = ""
+        packing_slip_continuation = False
         count = 0
         for page in pdf_reader.pages:
             count = count + 1
@@ -105,7 +114,18 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
 
                 # --- Strategy 1: new line-based packing slip parser ---
                 slip_items = parse_packing_slip(text, debug=debug)
+                # If this looks like a continuation of a multi-page packing slip,
+                # retry without requiring the 'Packing Slip' / 'SELLER SKU' headers.
+                if not slip_items and packing_slip_continuation:
+                    slip_items = parse_packing_slip(text, debug=debug, continuation=True)
+                # Strategy 1c: shipping-label format — has an exact 'Seller SKU' line
+                # but no 'Packing Slip' header.  continuation=True handles split SKUs.
+                if not slip_items:
+                    _ul = [l.strip().upper() for l in text.split('\n')]
+                    if any(l == 'SELLER SKU' for l in _ul):
+                        slip_items = parse_packing_slip(text, debug=debug, continuation=True)
                 if slip_items:
+                    packing_slip_continuation = True
                     previous_page = ""
                     for sku, qty_str in slip_items:
                         sku_norm = _norm(sku)
@@ -122,6 +142,7 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
 
                 # --- Strategy 2: legacy QTY...QTY flat-text parser (fallback) ---
                 if not translated_lines:
+                    packing_slip_continuation = False
                     flat = text.replace("\n", "").upper()
                     flat = previous_page + flat
                     try:
@@ -201,8 +222,8 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
 # Example usage
 replacements = {
     "G-BOX-GIFT-BOX-V1":"礼盒",
-    "G-BOX-FD-CHOCOLATE-ECLAIR-M":"中巧克力雪糕(新品)",
-    "G-BOX-FD-CHOCOLATE-ECLAIR-L":"大巧克力雪糕(新品)",
+    "G-BOX-FD-CHOCOLATE-ECLAIR-M":"中(新品)巧克力雪糕",
+    "G-BOX-FD-CHOCOLATE-ECLAIR-L":"大(新品)巧克力雪糕",
     "G-BOX-SOUR-WORM-GUMMY":"酸虫软糖",
     "G-BOX-WORM-GUMMY":"水果虫软糖",
     "G-BOX-CROCODILES-GUMMY":"鳄鱼软糖",
@@ -242,14 +263,14 @@ replacements = {
     "G-BOX-CHAMOY-PICKLES-LARGE" : "大辣的酸黄瓜",
     "G-BOX-CHAMOY-PICKLES-SMALL" : "小辣的酸黄瓜",
     "CHAMOY-CUCUMBER-LARGE": "大辣的黄瓜",
-    "G-BOX-FRUIT-ROLL-UP-L-CHQT " : "大彩虹卷卷卷糖",
-    "G-BOX-FRUIT-ROLL-UP-M-CHQT " : "中彩虹卷卷卷糖",
-    "G-BOX-FRUIT-ROLL-UP-L" : "大彩虹卷卷卷糖",
-    "G-BOX-FRUIT-ROLL-UP-M" : "中彩虹卷卷卷糖",
+    "G-BOX-FRUIT-ROLL-UP-L-CHQT " : "大彩虹卷糖",
+    "G-BOX-FRUIT-ROLL-UP-M-CHQT " : "中彩虹卷糖",
+    "G-BOX-FRUIT-ROLL-UP-L" : "大彩虹卷糖",
+    "G-BOX-FRUIT-ROLL-UP-M" : "中彩虹卷糖",
     "G-BOX-FD-LEMONCANDY-8OZ": "大柠檬糖",
     "LEMONCANDY-4OZ": "中柠檬糖",
     "G-BOX-FD-GUMMY-BEAR": "大熊软糖",
-    "G-BOX-FD-FROZEN-GUMMY-BEAR": "大冷冻熊软糖",
+    "G-BOX-FD-FROZEN-GUMMY-BEAR": "大熊软糖",
     "G-BOX-FD-AIR-CRUNCH-BBT": "大扁扁糖",
     "G-BOX-FD-AIR-CRUNCH": "大扁扁糖",
     "G-BOX-SOUR-FRETTLE-SMALL":"小酸彩虹糖",
@@ -294,10 +315,10 @@ replacements = {
     "G-BOX-FD-GUMMY-FROGS-3": "青蛙3只包装",
     "G-BOX-FD-TAFFY-COTTON-CANDY": "粉太妃糖",
     "G-BOX-FD-TAFFY-VANILLA":"香草太妃糖-白色",
-    "G-BOX-FD-TAFFY-WATERMELON": "西瓜太妃糖-粉红加绿色",
-    "G-BOX-FD-TAFFY-BANANA": "香蕉太妃糖-黄加粉红色",
-    "G-BOX-FD-TAFFY-PEPPERMINT": "薄荷太妃糖-白加粉红色",
-    "G-BOX-FD-TAFFY-GREEN-APPLE": "青苹果太妃糖-绿色",
+    "G-BOX-FD-TAFFY-WATERMELON": "西瓜太妃糖",
+    "G-BOX-FD-TAFFY-BANANA": "香蕉太妃糖",
+    "G-BOX-FD-TAFFY-PEPPERMINT": "薄荷太妃糖",
+    "G-BOX-FD-TAFFY-GREEN-APPLE": "青苹果太妃糖",
     "G-BOX-FD-TAFFY-SHAVED-ICE" : "刨冰太妃糖",
     "G-BOX-FD-TAFFY-KIWI-STRAWBERRY" : "草莓太妃糖",
     "G-BOX-FD-TAFFY-BLACKBERRY-CRUMBLE" : "莓子太妃糖",
@@ -311,7 +332,29 @@ replacements = {
     "G-BOX-FD-DUBAI-CHOCOLATE-M":"中迪拜巧克力",
     "G-BOX-FD-JELLO-BB-LEMON-L":"大蓝绿混合果冻",
     "G-BOX-FD-JELLO-BB-LEMON-M":"中蓝绿混合果冻",
-    "G-BOX-FD-DUBAI-CHOCOLATE-L":"大迪拜巧克力"
+    "G-BOX-FD-DUBAI-CHOCOLATE-L":"大迪拜巧克力",
+    "G-BOX-FDS-ORI-CANDY-CANE-10": "10条原味拐杖",
+    "G-BOX-CANDY-CANE-VARIETY-10": "10条混合拐杖",
+    "G-BOX-CANDY-CANE-CAR-MARSH-10": "10条白棉花拐杖",
+    "HAKAM-MEDIUM-ORIGINAL-FRETTLES": "中原味彩虹糖",
+    "HAKAM-SMALL-ORIGINAL-FRETTLES": "小原味彩虹糖",
+    "HAKAM-LARGE-ORIGINAL-FRETTLES": "大原味彩虹糖",
+    "G-BOX-FD-JELLO-CHERRY-L": "大樱桃果冻",
+    "G-BOX-FD-JELLO-CHERRY-S": "小樱桃果冻",
+    "G-BOX-FD-JELLO-CHERRY-M": "中樱桃果冻",
+    "G-BOX-SOUR-SMALL": "小酸彩虹糖",
+    "G-BOX-SOUR-LARGE": "大酸彩虹糖",
+    "G-BOX-FRETTLES-LARGE": "大原味彩虹糖",
+    "G-BOX-FRETTLES-SMALL": "小原味彩虹糖",
+    "G-BOX-FRETTLES-MEDIUM": "中原味彩虹糖",
+    "G-BOX-FD-WATERMELON-GUMMY-CANDY": "大西瓜软糖",
+    "G-BOX-FD-TAFFY-WATERMELON-CANDY": "西瓜太妃糖",
+    "G-BOX-FD-DUBAI-CHOCOLATE-S": "小迪拜巧克力(碎块)",
+    "G-BOX-FD-GUMMY-SOUR-WORM": "酸虫软糖",
+    "G-BOX-FD-CANDY-CORN-L": "万圣玉米糖",
+    "G-BOX-FD-CANDY-CO": "万圣玉米糖",
+    "G-BOX-FD-ICE-CREAM-CUBES-VANILLA-S": "小香草方块（碎块）",
+    "G-BOX-FD-CC-ICECREAM-SANDWICH-WHOLE": "小三明治",
 }
 
 hakam_replacements = {

@@ -1221,16 +1221,19 @@ async def scan_order_skus(page: Page) -> None:
         raw_items: list[list[str]] = await popover.evaluate("""el => {
             const seen = new Set();
             const out = [];
-            el.querySelectorAll("div[data-tid='m4b_space'] > div.core-space-item").forEach(item => {
-                const skuEl = item.querySelector("div.line-clamp-2");
-                if (!skuEl) return;
+            el.querySelectorAll("div.line-clamp-2").forEach(skuEl => {
                 const txt = skuEl.innerText || '';
                 if (!txt.includes('Seller SKU:')) return;
                 const sku = txt.replace('Seller SKU:', '').trim();
                 if (!sku || seen.has(sku)) return;
                 seen.add(sku);
-                const qtyEl = item.querySelector("[data-tid='m4b_input_number']");
-                out.push([sku, qtyEl ? (qtyEl.value || '1') : '1']);
+                // The qty <input> lives in a sibling div next to <main>.
+                // closest('main') reaches <main>, .parentElement is their common parent.
+                const mainEl = skuEl.closest('main');
+                const qtyInput = mainEl
+                    ? mainEl.parentElement.querySelector('input[data-tid="m4b_input_number"]')
+                    : null;
+                out.push([sku, qtyInput ? (qtyInput.value || '1') : '1']);
             });
             return out;
         }""")
@@ -1317,7 +1320,10 @@ async def scan_order_skus(page: Page) -> None:
 
         # Confirm the value (Enter closes/saves the inline popover).
         await weight_input.press("Enter")
-        await asyncio.sleep(0.5)
+        try:
+            await weight_popover.wait_for(state="hidden", timeout=3_000)
+        except Exception:
+            await asyncio.sleep(0.5)
 
     print("\n=== SKUs found ===")
     for idx, order_skus in enumerate(skus, 1):
@@ -1371,6 +1377,8 @@ async def main():
 
         if args.mode == "combine-orders":
             await combine_orders_mode(page)
+            await save_cookies(context, args.account)
+            print("Session cookies refreshed and saved.")
             print("Done. Closing browser.")
             await browser.close()
             return
@@ -1381,6 +1389,8 @@ async def main():
                 mode=args.mode,
                 do_print=args.do_print == "yes",
             )
+        await save_cookies(context, args.account)
+        print("Session cookies refreshed and saved.")
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
 
