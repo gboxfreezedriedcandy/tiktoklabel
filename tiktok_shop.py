@@ -1229,7 +1229,10 @@ async def scan_order_skus(page: Page) -> None:
                 const sku = txt.replace('Seller SKU:', '').trim();
                 if (!sku || seen.has(sku)) return;
                 seen.add(sku);
-                const qtyEl = item.querySelector("[data-tid='m4b_input_number']");
+                const qtyWrapper = item.querySelector("[data-tid='m4b_input_number']");
+                const qtyEl = qtyWrapper
+                    ? (qtyWrapper.tagName === 'INPUT' ? qtyWrapper : qtyWrapper.querySelector('input'))
+                    : null;
                 out.push([sku, qtyEl ? (qtyEl.value || '1') : '1']);
             });
             return out;
