@@ -374,4 +374,18 @@ gboxcandyshop_replacement = {
     "G-BOX-FD-DUBAI-CHOCOLATE-L":"大迪拜巧克力"
 }
 
-replace_text_in_pdf("08-08_08-26-44_Shipping label+Packing slip.pdf", "output-8-08-2025-gbox-4.pdf", replacements)
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Overlay Chinese product name translations onto a PDF shipping label.")
+    parser.add_argument("input", help="Input PDF path")
+    parser.add_argument("output", help="Output PDF path")
+    parser.add_argument("--store", choices=["gbox", "hakam", "gboxcandyshop"], default="gbox",
+                        help="Which replacement dictionary to use (default: gbox)")
+    args = parser.parse_args()
+
+    store_map = {
+        "gbox": replacements,
+        "hakam": hakam_replacements,
+        "gboxcandyshop": gboxcandyshop_replacement,
+    }
+    replace_text_in_pdf(args.input, args.output, store_map[args.store])
