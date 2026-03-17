@@ -31,8 +31,12 @@ def parse_packing_slip(raw_text, debug=False, continuation=False):
     Returns a list of (sku_upper, qty_str) tuples, or [] if this is not a
     packing slip page or no SKUs are found.
     """
-    if not continuation and 'Packing Slip' not in raw_text:
-        return []
+    if not continuation:
+        upper_lines_check = [l.strip().upper() for l in raw_text.split('\n')]
+        has_packing_slip = 'Packing Slip' in raw_text
+        has_seller_sku_header = any(l == 'SELLER SKU' for l in upper_lines_check)
+        if not has_packing_slip and not has_seller_sku_header:
+            return []
 
     lines = raw_text.split('\n')
     upper_lines = [l.strip().upper() for l in lines]
@@ -118,12 +122,6 @@ def replace_text_in_pdf(input_pdf_path, output_pdf_path, replacements, debug=Fal
                 # retry without requiring the 'Packing Slip' / 'SELLER SKU' headers.
                 if not slip_items and packing_slip_continuation:
                     slip_items = parse_packing_slip(text, debug=debug, continuation=True)
-                # Strategy 1c: shipping-label format — has an exact 'Seller SKU' line
-                # but no 'Packing Slip' header.  continuation=True handles split SKUs.
-                if not slip_items:
-                    _ul = [l.strip().upper() for l in text.split('\n')]
-                    if any(l == 'SELLER SKU' for l in _ul):
-                        slip_items = parse_packing_slip(text, debug=debug, continuation=True)
                 if slip_items:
                     packing_slip_continuation = True
                     previous_page = ""
