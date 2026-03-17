@@ -1,10 +1,7 @@
 import PyPDF2
 import re
 import sys
-
-
-def _norm(s):
-    return re.sub(r'[-\s]+', '', s)
+from pdf_replace_text import parse_packing_slip, _norm
 
 
 def extract_sku_qty(pdf_path):
@@ -32,17 +29,28 @@ def extract_sku_qty(pdf_path):
             print(raw)
 
             # --- 2. Line-by-line with highlights ---
-            print("\n[2] LINE-BY-LINE (lines with G-BOX / QTY / SELLER SKU highlighted):")
+            print("\n[2] LINE-BY-LINE (lines with G-BOX / HAKAM / QTY / SELLER SKU highlighted):")
             for i, line in enumerate(raw.split('\n')):
                 tag = ""
                 u = line.upper()
                 if 'G-BOX' in u:
                     tag = " <<< G-BOX"
+                elif 'HAKAM' in u:
+                    tag = " <<< HAKAM"
                 elif 'QTY' in u:
                     tag = " <<< QTY"
                 elif 'SELLER SKU' in u:
                     tag = " <<< SELLER SKU"
                 print(f"  {i:3d}: {line!r}{tag}")
+
+            # --- 2b. parse_packing_slip() called directly ---
+            print("\n[2b] parse_packing_slip() DIRECT OUTPUT:")
+            print(f"  'Packing Slip' in raw text : {'Packing Slip' in raw}")
+            upper_lines = [l.strip().upper() for l in raw.split('\n')]
+            seller_sku_exact = [i for i, l in enumerate(upper_lines) if l == 'SELLER SKU']
+            print(f"  Exact 'SELLER SKU' line(s) : {seller_sku_exact}")
+            slip_items = parse_packing_slip(raw, debug=True)
+            print(f"  Returned items             : {slip_items}")
 
             # --- 3. Simulate existing pdf_replace_text.py logic ---
             print("\n[3] EXISTING PARSER SIMULATION (newlines removed, uppercased):")
@@ -83,9 +91,11 @@ def extract_sku_qty(pdf_path):
                     qty = re.search(r'\b(\d+)\s*$', line.strip())
                     print(f"  Row {i}: {line!r}  =>  SKU={gbox.group(1) if gbox else 'NOT FOUND'}  QTY={qty.group(1) if qty else 'NOT FOUND'}")
 
-            # --- 5. All G-BOX tokens found anywhere on page ---
+            # --- 5. All G-BOX / HAKAM tokens found anywhere on page ---
             all_gbox = re.findall(r'G-BOX[A-Z0-9\-]+', upper)
             print(f"\n[5] ALL G-BOX TOKENS ON PAGE: {all_gbox}")
+            all_hakam = re.findall(r'HAKAM[A-Z0-9\-]+', upper)
+            print(f"[5b] ALL HAKAM TOKENS ON PAGE: {all_hakam}")
 
             # --- 6. All lines ending with a digit (likely qty column) ---
             print("\n[6] LINES ENDING WITH A DIGIT (candidate qty rows):")
