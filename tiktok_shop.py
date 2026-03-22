@@ -1466,7 +1466,10 @@ async def scan_order_skus(page: Page) -> None:
             await popover.wait_for(state="hidden", timeout=2_000)
         except Exception:
             pass
-        await asyncio.sleep(0.5)  # let the close animation fully settle
+        # Press Escape to make sure no other popover/overlay is open, then give
+        # the page a moment to fully settle before touching the weight cell.
+        await page.keyboard.press("Escape")
+        await asyncio.sleep(0.8)
 
         # Locate the weight cell in this row and click it directly to open the
         # weight popover. Clicking the cell is more reliable than trying to hit
@@ -1490,16 +1493,19 @@ async def scan_order_skus(page: Page) -> None:
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
 
         weight_opened = False
-        for attempt, timeout_ms in enumerate([1_500, 2_500]):
+        for attempt in range(4):
             try:
                 await weight_cell.scroll_into_view_if_needed()
                 await weight_cell.click()
-                await weight_popover.wait_for(state="visible", timeout=timeout_ms)
+                await weight_popover.wait_for(state="visible", timeout=2_000)
                 weight_opened = True
                 break
             except Exception:
-                if attempt == 0:
-                    await asyncio.sleep(0.3)
+                wait_s = 0.5 * (attempt + 1)
+                print(f"  Row {i + 1}: weight popover not visible (attempt {attempt + 1}), waiting {wait_s}s...")
+                # Dismiss anything that might be blocking, then retry.
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(wait_s)
 
         if not weight_opened:
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
