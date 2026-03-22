@@ -3,6 +3,7 @@ import base64
 import json
 import asyncio
 import os
+import re
 import stat
 import time
 from datetime import date
@@ -751,7 +752,27 @@ async def _apply_product_filter(
 
 
 def _is_checked(cls: str, aria: str | None) -> bool:
-    return "checked" in cls.lower() or (aria or "").lower() == "true"
+    # Use a negative lookbehind to avoid false-positives on class names that
+    # contain "unchecked" (e.g. "core-checkbox--unchecked").
+    class_checked = bool(re.search(r'(?<!un)checked', cls.lower()))
+    return class_checked or (aria or "").lower() == "true"
+
+
+async def _orders_are_selected(page: Page) -> bool:
+    """Return True if the 'N orders on this page are selected' banner is visible."""
+    selectors = [
+        "text=/\\d+ orders? on this page are selected/i",
+        "[class*='select-info']",
+        "[class*='selection-info']",
+        "[class*='selected-tip']",
+    ]
+    for sel in selectors:
+        try:
+            if await page.locator(sel).first.is_visible(timeout=800):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 async def _click_select_all_checkbox(page: Page) -> None:
@@ -859,7 +880,9 @@ async def _click_select_all_checkbox(page: Page) -> None:
         except Exception:
             continue
         await asyncio.sleep(0.4)
-        if await is_now_checked():
+        # Both the DOM attribute AND the selection banner must confirm success
+        # to avoid false-positives from class names like 'core-checkbox--unchecked'.
+        if await is_now_checked() and await _orders_are_selected(page):
             print(f"Select-all checkbox checked via: {name}")
             return
 
