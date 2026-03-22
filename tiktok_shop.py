@@ -1466,24 +1466,57 @@ async def scan_order_skus(page: Page) -> None:
             await popover.wait_for(state="hidden", timeout=2_000)
         except Exception:
             pass
+        await asyncio.sleep(0.5)  # let the close animation fully settle
 
-        # Click the weight edit icon scoped to this row (avoids hitting another row's icon).
+        # Locate the weight cell in this row, hover it to reveal the edit icon,
+        # then click the icon. Scoping to the cell avoids grabbing the product
+        # edit icon (which also uses svg.theme-arco-icon-edit and appears first).
+        weight_cell_selectors = [
+            "[data-log_click_for='cell_package_weight']",
+            "[data-log_click_for='cell_weight']",
+            "td[class*='weight']",
+        ]
+        weight_cell = None
+        for wcs in weight_cell_selectors:
+            candidate = row.locator(wcs).first
+            if await candidate.count() > 0:
+                weight_cell = candidate
+                break
+
+        if weight_cell is None:
+            # Fallback: last table cell in the row tends to be the weight column
+            weight_cell = row.locator("td").last
+
+        try:
+            await weight_cell.scroll_into_view_if_needed()
+            await weight_cell.hover()
+            await asyncio.sleep(0.3)  # wait for hover-reveal animation
+        except Exception:
+            pass
+
+        # Click the weight edit icon scoped to the weight cell (preferred) or row.
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
-        edit_icon = row.locator("svg.theme-arco-icon-edit").first
+        edit_icon = weight_cell.locator("svg.theme-arco-icon-edit, button[aria-label*='edit' i], button[data-log_click_for*='weight']").first
+        if await edit_icon.count() == 0:
+            # Wider fallback scoped to the row
+            edit_icon = row.locator("svg.theme-arco-icon-edit").last
 
         weight_opened = False
-        try:
-            await edit_icon.click(force=True)
-            await weight_popover.wait_for(state="visible", timeout=800)
-            weight_opened = True
-        except Exception:
-            # one retry with a longer window
+        for attempt, timeout_ms in enumerate([1_500, 2_500]):
             try:
+                await edit_icon.scroll_into_view_if_needed()
                 await edit_icon.click(force=True)
-                await weight_popover.wait_for(state="visible", timeout=1_500)
+                await weight_popover.wait_for(state="visible", timeout=timeout_ms)
                 weight_opened = True
+                break
             except Exception:
-                pass
+                if attempt == 0:
+                    # Re-hover in case the icon hid itself after the first miss
+                    try:
+                        await weight_cell.hover()
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
 
         if not weight_opened:
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
