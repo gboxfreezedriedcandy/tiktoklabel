@@ -1181,7 +1181,13 @@ async def navigate_to_awaiting_shipment(
 ARRANGE_SHIPMENT_SELECTORS = [
     "button[data-id='fulfillment.manage_order.batch_arrange_shipment']",
     "button[data-log_click_for='arrange_shipment']",
+    # Playwright :has-text works regardless of nesting depth
+    "button:has-text('Arrange shipment')",
+    "[role='button']:has-text('Arrange shipment')",
+    # XPath fallback
     "//button[.//span[contains(normalize-space(),'Arrange shipment')]]",
+    "//button[contains(normalize-space(),'Arrange shipment')]",
+    "//*[@role='button' and contains(normalize-space(),'Arrange shipment')]",
 ]
 
 
@@ -1189,19 +1195,43 @@ async def _click_arrange_shipment_button(page: Page) -> None:
     """
     Wait for the 'Arrange shipment' button to appear (it only shows after rows
     are selected) then click it.
+
+    TikTok renders this button in a fixed bottom action bar, so we scroll to
+    the bottom first to ensure it is in the viewport before looking for it.
     """
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await asyncio.sleep(0.5)
+
     for selector in ARRANGE_SHIPMENT_SELECTORS:
         try:
             locator = page.locator(selector).first
             await locator.wait_for(state="visible", timeout=10_000)
+            await locator.scroll_into_view_if_needed()
             await locator.click()
             print("'Arrange shipment' button clicked.")
             return
         except Exception:
             continue
 
+    # JS fallback: find any visible button/div whose text includes the phrase
+    clicked = await page.evaluate("""() => {
+        const phrase = 'Arrange shipment';
+        const candidates = [...document.querySelectorAll('button, [role="button"], a')];
+        for (const el of candidates) {
+            if (el.offsetParent !== null && el.textContent.includes(phrase)) {
+                el.click();
+                return true;
+            }
+        }
+        return false;
+    }""")
+    if clicked:
+        print("'Arrange shipment' button clicked via JS fallback.")
+        return
+
     screenshot_path = Path("debug_arrange_shipment.png")
-    await page.screenshot(path=str(screenshot_path), full_page=True)
+    # Use full_page=False so fixed/sticky bars are captured at their viewport position
+    await page.screenshot(path=str(screenshot_path), full_page=False)
     raise RuntimeError(
         "Could not find the 'Arrange shipment' button. "
         f"Screenshot saved to '{screenshot_path}'."
