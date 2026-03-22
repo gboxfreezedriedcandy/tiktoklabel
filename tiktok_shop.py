@@ -1468,9 +1468,9 @@ async def scan_order_skus(page: Page) -> None:
             pass
         await asyncio.sleep(0.5)  # let the close animation fully settle
 
-        # Locate the weight cell in this row, hover it to reveal the edit icon,
-        # then click the icon. Scoping to the cell avoids grabbing the product
-        # edit icon (which also uses svg.theme-arco-icon-edit and appears first).
+        # Locate the weight cell in this row and click it directly to open the
+        # weight popover. Clicking the cell is more reliable than trying to hit
+        # the small edit icon that appears on hover.
         weight_cell_selectors = [
             "[data-log_click_for='cell_package_weight']",
             "[data-log_click_for='cell_weight']",
@@ -1487,56 +1487,19 @@ async def scan_order_skus(page: Page) -> None:
             # Fallback: last table cell in the row tends to be the weight column
             weight_cell = row.locator("td").last
 
-        try:
-            await weight_cell.scroll_into_view_if_needed()
-            await weight_cell.hover()
-            await asyncio.sleep(0.3)  # wait for hover-reveal animation
-        except Exception:
-            pass
-
-        # Click the weight edit icon scoped to the weight cell (preferred) or row.
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
-        edit_icon = weight_cell.locator("svg.theme-arco-icon-edit, button[aria-label*='edit' i], button[data-log_click_for*='weight']").first
-        if await edit_icon.count() == 0:
-            # Wider fallback scoped to the row
-            edit_icon = row.locator("svg.theme-arco-icon-edit").last
 
         weight_opened = False
         for attempt, timeout_ms in enumerate([1_500, 2_500]):
             try:
-                # Do NOT call scroll_into_view_if_needed on the icon — scrolling
-                # moves the mouse off the cell and hides the hover-revealed icon.
-                # Instead get the bounding box and click via page.mouse so the
-                # cursor travels directly to the icon without a scroll.
-                box = await edit_icon.bounding_box()
-                if box:
-                    cx = box["x"] + box["width"] / 2
-                    cy = box["y"] + box["height"] / 2
-                    await page.mouse.move(cx, cy)
-                    await asyncio.sleep(0.1)
-                    await page.mouse.click(cx, cy)
-                else:
-                    # Bounding box unavailable — try JS dispatch as direct fallback
-                    handle = await edit_icon.element_handle()
-                    if handle:
-                        await page.evaluate(
-                            "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,view:window}))",
-                            handle,
-                        )
+                await weight_cell.scroll_into_view_if_needed()
+                await weight_cell.click()
                 await weight_popover.wait_for(state="visible", timeout=timeout_ms)
                 weight_opened = True
                 break
             except Exception:
                 if attempt == 0:
-                    # Re-hover and try JS click on retry
-                    try:
-                        await weight_cell.hover()
-                        await asyncio.sleep(0.4)
-                        handle = await edit_icon.element_handle()
-                        if handle:
-                            await page.evaluate("el => el.click()", handle)
-                    except Exception:
-                        pass
+                    await asyncio.sleep(0.3)
 
         if not weight_opened:
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
