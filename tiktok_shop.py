@@ -1504,17 +1504,37 @@ async def scan_order_skus(page: Page) -> None:
         weight_opened = False
         for attempt, timeout_ms in enumerate([1_500, 2_500]):
             try:
-                await edit_icon.scroll_into_view_if_needed()
-                await edit_icon.click(force=True)
+                # Do NOT call scroll_into_view_if_needed on the icon — scrolling
+                # moves the mouse off the cell and hides the hover-revealed icon.
+                # Instead get the bounding box and click via page.mouse so the
+                # cursor travels directly to the icon without a scroll.
+                box = await edit_icon.bounding_box()
+                if box:
+                    cx = box["x"] + box["width"] / 2
+                    cy = box["y"] + box["height"] / 2
+                    await page.mouse.move(cx, cy)
+                    await asyncio.sleep(0.1)
+                    await page.mouse.click(cx, cy)
+                else:
+                    # Bounding box unavailable — try JS dispatch as direct fallback
+                    handle = await edit_icon.element_handle()
+                    if handle:
+                        await page.evaluate(
+                            "el => el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,view:window}))",
+                            handle,
+                        )
                 await weight_popover.wait_for(state="visible", timeout=timeout_ms)
                 weight_opened = True
                 break
             except Exception:
                 if attempt == 0:
-                    # Re-hover in case the icon hid itself after the first miss
+                    # Re-hover and try JS click on retry
                     try:
                         await weight_cell.hover()
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(0.4)
+                        handle = await edit_icon.element_handle()
+                        if handle:
+                            await page.evaluate("el => el.click()", handle)
                     except Exception:
                         pass
 
