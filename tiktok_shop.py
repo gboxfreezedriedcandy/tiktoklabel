@@ -2,12 +2,61 @@ import argparse
 import base64
 import json
 import asyncio
+import os
+import stat
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 
 TIKTOK_SHOP_URL = "https://seller-us.tiktok.com/account/login"
+CREDENTIALS_FILE = Path("credentials.json")
+
+# Login form selectors (tried in order)
+_EMAIL_SELECTORS = [
+    'input[name="email"]',
+    'input[type="email"]',
+    'input[placeholder*="email" i]',
+    'input[placeholder*="phone" i]',
+]
+_PASSWORD_SELECTORS = [
+    'input[name="password"]',
+    'input[type="password"]',
+]
+_SUBMIT_SELECTORS = [
+    'button[type="submit"]',
+    'button:has-text("Log in")',
+    'button:has-text("Sign in")',
+    'button:has-text("Login")',
+]
+
+
+def load_credentials(account: str = "default") -> Optional[dict]:
+    """Return {'email': ..., 'password': ...} for *account*, or None if not found."""
+    if not CREDENTIALS_FILE.exists():
+        return None
+    try:
+        data = json.loads(CREDENTIALS_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get(account)
+
+
+def save_credentials(account: str, email: str, password: str) -> None:
+    """Persist credentials for *account* to credentials.json with mode 600."""
+    data: dict = {}
+    if CREDENTIALS_FILE.exists():
+        try:
+            data = json.loads(CREDENTIALS_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data[account] = {"email": email, "password": password}
+    CREDENTIALS_FILE.write_text(json.dumps(data, indent=2))
+    # Restrict to owner read/write only (no effect on Windows, fine on macOS/Linux)
+    try:
+        os.chmod(CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
 
 
 def _cookies_file(account: str) -> Path:
@@ -69,8 +118,25 @@ async def wait_for_captcha_if_present(page: Page) -> None:
             continue
 
 
+async def _find_and_fill(page: Page, selectors: list[str], value: str) -> bool:
+    """Try each selector in order; fill the first visible one. Returns True on success."""
+    for sel in selectors:
+        try:
+            el = await page.query_selector(sel)
+            if el and await el.is_visible():
+                await el.fill(value)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def login(playwright, account: str = "default") -> None:
-    """Open browser for manual login, then save session cookies."""
+    """Open browser for login, then save session cookies.
+
+    If credentials.json contains an entry for *account*, the email and password
+    are filled in automatically.  Otherwise the user must log in manually.
+    """
     browser = await playwright.chromium.launch(headless=False)
     context = await browser.new_context()
     page = await context.new_page()
@@ -79,7 +145,30 @@ async def login(playwright, account: str = "default") -> None:
     await page.goto(TIKTOK_SHOP_URL)
     await wait_for_captcha_if_present(page)
 
-    print("Please log in manually in the browser window.")
+    creds = load_credentials(account)
+    if creds:
+        print(f"Credentials found for account '{account}'. Attempting auto-login...")
+        await asyncio.sleep(2)  # let the page render inputs
+
+        filled_email = await _find_and_fill(page, _EMAIL_SELECTORS, creds["email"])
+        filled_password = await _find_and_fill(page, _PASSWORD_SELECTORS, creds["password"])
+
+        if filled_email and filled_password:
+            # Try to submit the form
+            for sel in _SUBMIT_SELECTORS:
+                try:
+                    el = await page.query_selector(sel)
+                    if el and await el.is_visible():
+                        await el.click()
+                        break
+                except Exception:
+                    continue
+            print("Credentials submitted. Waiting for dashboard...")
+        else:
+            print("Could not locate login fields — please complete login manually.")
+    else:
+        print("Please log in manually in the browser window.")
+
     print("Waiting for you to reach the seller dashboard...")
 
     # Wait until the URL changes away from the login page; no hard timeout so
@@ -1385,7 +1474,17 @@ async def main():
                         help="Account name to use for login (determines which cookies file to load, e.g. 'foo' → cookies_foo.json)")
     parser.add_argument("--print", default="no", choices=["yes", "no"], dest="do_print",
                         help="Whether to click 'Arrange shipment+print' (default: no)")
+    parser.add_argument("--set-credentials", action="store_true", dest="set_credentials",
+                        help="Securely store email/password for --account and exit")
     args = parser.parse_args()
+
+    if args.set_credentials:
+        import getpass
+        email = input(f"Email for account '{args.account}': ").strip()
+        password = getpass.getpass(f"Password for account '{args.account}': ")
+        save_credentials(args.account, email, password)
+        print(f"Credentials saved for account '{args.account}' in {CREDENTIALS_FILE} (mode 600).")
+        return
 
     async with async_playwright() as playwright:
         browser, context, page = await get_authenticated_context(playwright, args.account)
