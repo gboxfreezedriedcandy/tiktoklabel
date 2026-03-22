@@ -1535,20 +1535,36 @@ async def scan_order_skus(page: Page) -> None:
         total_weight += extra_weight
 
         weight_str = str(round(total_weight, 5)).rstrip("0").rstrip(".")
+        print(f"  Row {i + 1}: total weight to enter = {weight_str} kg  (skus={order_skus}, extra={extra_weight})")
 
         # Set the weight using key-event approach (fill()/JS setter don't trigger v-model).
         weight_input = weight_popover.locator("input#packageWeight_input").first
-        try:
-            await weight_input.wait_for(state="visible", timeout=5_000)
-            await weight_input.click()
-            await asyncio.sleep(0.2)
-            await weight_input.evaluate("el => el.select()")
-            await asyncio.sleep(0.1)
-            await page.keyboard.type(weight_str, delay=50)
-            actual = await weight_input.input_value()
-            print(f"  Row {i + 1}: weight set to {actual!r} (computed {weight_str} from {order_skus})")
-        except Exception as e:
-            print(f"  Row {i + 1}: warning — could not set weight: {e}")
+        input_ok = False
+        for input_attempt in range(3):
+            try:
+                await weight_input.wait_for(state="visible", timeout=5_000)
+                await weight_input.click()
+                await asyncio.sleep(0.2)
+                # Select-all then type to replace any existing value.
+                await weight_input.evaluate("el => { el.select(); }")
+                await asyncio.sleep(0.1)
+                await page.keyboard.type(weight_str, delay=50)
+                actual = await weight_input.input_value()
+                print(f"  Row {i + 1}: input value after typing = {actual!r} (expected {weight_str!r})")
+                if actual.strip() == weight_str:
+                    input_ok = True
+                    break
+                # Value doesn't match — clear and retry.
+                print(f"  Row {i + 1}: mismatch on attempt {input_attempt + 1}, retrying...")
+                await weight_input.evaluate("el => { el.value = ''; el.select(); }")
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                print(f"  Row {i + 1}: warning — could not set weight (attempt {input_attempt + 1}): {e}")
+                await asyncio.sleep(0.3)
+
+        if not input_ok:
+            print(f"  Row {i + 1}: ERROR — weight input did not match after 3 attempts; skipping row.")
+            await weight_input.press("Escape")
             continue
 
         # Confirm the value (Enter closes/saves the inline popover).
@@ -1557,6 +1573,13 @@ async def scan_order_skus(page: Page) -> None:
             await weight_popover.wait_for(state="hidden", timeout=3_000)
         except Exception:
             await asyncio.sleep(0.5)
+
+        # Verify the cell now shows the correct weight after saving.
+        try:
+            cell_text = (await weight_cell.inner_text()).strip()
+            print(f"  Row {i + 1}: cell shows {cell_text!r} after save (expected {weight_str})")
+        except Exception:
+            pass
 
     print("\n=== SKUs found ===")
     for idx, order_skus in enumerate(skus, 1):
