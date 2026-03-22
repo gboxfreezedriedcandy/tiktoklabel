@@ -4,6 +4,7 @@ import json
 import asyncio
 import os
 import stat
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
@@ -73,21 +74,39 @@ def _cookies_file(account: str) -> Path:
     return Path(f"cookies_{account}.json")
 
 
+_TIKTOK_DOMAINS = ("tiktok.com", "seller-us.tiktok.com", "tiktokglobalshop.com")
+
+
+def _is_tiktok_cookie(c: dict) -> bool:
+    domain = c.get("domain", "")
+    return any(domain == d or domain.endswith("." + d) for d in _TIKTOK_DOMAINS)
+
+
 async def save_cookies(context: BrowserContext, account: str = "default") -> None:
     path = _cookies_file(account)
-    cookies = await context.cookies()
-    path.write_text(json.dumps(cookies, indent=2))
-    print(f"Saved {len(cookies)} cookies to {path}")
+    all_cookies = await context.cookies()
+    # Keep only TikTok-domain cookies to avoid bloating the file with
+    # third-party tracker / CDN cookies that don't affect authentication.
+    session_cookies = [c for c in all_cookies if _is_tiktok_cookie(c)]
+    path.write_text(json.dumps(session_cookies, indent=2))
+    print(f"Saved {len(session_cookies)} TikTok cookies to {path} "
+          f"(filtered {len(all_cookies) - len(session_cookies)} unrelated cookies)")
 
 
 async def load_cookies(context: BrowserContext, account: str = "default") -> bool:
-    """Load cookies from file into context. Returns True if cookies were loaded."""
+    """Load non-expired cookies from file into context. Returns True if any were loaded."""
     path = _cookies_file(account)
     if not path.exists():
         return False
+    now = time.time()
     cookies = json.loads(path.read_text())
-    await context.add_cookies(cookies)
-    print(f"Loaded {len(cookies)} cookies from {path}")
+    # Drop cookies that have already expired (expires == -1 means session cookie, keep those)
+    valid = [c for c in cookies if c.get("expires", -1) == -1 or c["expires"] > now]
+    if not valid:
+        return False
+    await context.add_cookies(valid)
+    print(f"Loaded {len(valid)} cookies from {path} "
+          f"({len(cookies) - len(valid)} expired cookies skipped)")
     return True
 
 
@@ -240,7 +259,12 @@ async def get_authenticated_context(playwright, account: str = "default") -> tup
                 f"Cannot reach {TIKTOK_SHOP_URL}. Check your internet connection and try again."
             ) from e
         raise
-    await asyncio.sleep(2)
+    # Wait up to 8s for TikTok's JS to finish redirecting before deciding
+    # whether the session is still valid (a fixed 2s sleep was too short).
+    for _ in range(8):
+        if "login" not in page.url and "passport" not in page.url:
+            break
+        await asyncio.sleep(1)
 
     # Check whether cookies are still valid
     if "login" in page.url or "passport" in page.url:
@@ -267,7 +291,16 @@ async def get_authenticated_context(playwright, account: str = "default") -> tup
 
 
 async def _try_cookies_exist(account: str = "default") -> bool:
-    return _cookies_file(account).exists()
+    """Return True only if the cookies file exists and has at least one non-expired cookie."""
+    path = _cookies_file(account)
+    if not path.exists():
+        return False
+    try:
+        now = time.time()
+        cookies = json.loads(path.read_text())
+        return any(c.get("expires", -1) == -1 or c["expires"] > now for c in cookies)
+    except (json.JSONDecodeError, OSError):
+        return False
 
 
 ORDERS_URL = "https://seller-us.tiktok.com/order"
