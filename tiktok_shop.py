@@ -116,7 +116,15 @@ async def get_authenticated_context(playwright, account: str = "default") -> tup
     page = await context.new_page()
 
     print("Resuming session with saved cookies...")
-    await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+    try:
+        await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+    except Exception as e:
+        await browser.close()
+        if "ERR_ADDRESS_UNREACHABLE" in str(e) or "ERR_INTERNET_DISCONNECTED" in str(e) or "ERR_NAME_NOT_RESOLVED" in str(e):
+            raise RuntimeError(
+                f"Cannot reach {TIKTOK_SHOP_URL}. Check your internet connection and try again."
+            ) from e
+        raise
     await asyncio.sleep(2)
 
     # Check whether cookies are still valid
@@ -129,7 +137,15 @@ async def get_authenticated_context(playwright, account: str = "default") -> tup
         context = await browser.new_context()
         await load_cookies(context, account)
         page = await context.new_page()
-        await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+        try:
+            await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+        except Exception as e:
+            await browser.close()
+            if "ERR_ADDRESS_UNREACHABLE" in str(e) or "ERR_INTERNET_DISCONNECTED" in str(e) or "ERR_NAME_NOT_RESOLVED" in str(e):
+                raise RuntimeError(
+                    f"Cannot reach {TIKTOK_SHOP_URL}. Check your internet connection and try again."
+                ) from e
+            raise
         await asyncio.sleep(2)
 
     return browser, context, page
