@@ -12,12 +12,20 @@ from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 TIKTOK_SHOP_URL = "https://seller-us.tiktok.com/account/login"
 CREDENTIALS_FILE = Path("credentials.json")
 
-# Login form selectors (tried in order)
+# Login form selectors (tried in order).
+# TikTok Shop's email/phone field is type="text" with placeholder
+# "Email or phone number", so we include broad text-input fallbacks.
 _EMAIL_SELECTORS = [
     'input[name="email"]',
     'input[type="email"]',
     'input[placeholder*="email" i]',
     'input[placeholder*="phone" i]',
+    'input[placeholder*="account" i]',
+    'input[autocomplete="username"]',
+    'input[autocomplete="email"]',
+    # Broad fallback: first visible text input on the page (should be the
+    # email/phone field since the password input is type="password")
+    'input[type="text"]',
 ]
 _PASSWORD_SELECTORS = [
     'input[name="password"]',
@@ -148,9 +156,27 @@ async def login(playwright, account: str = "default") -> None:
     creds = load_credentials(account)
     if creds:
         print(f"Credentials found for account '{account}'. Attempting auto-login...")
-        await asyncio.sleep(2)  # let the page render inputs
+        # Wait for any text/email input to appear before trying to fill.
+        # This handles JS-rendered forms that aren't present immediately.
+        try:
+            await page.wait_for_selector(
+                'input[type="text"], input[type="email"]',
+                state="visible",
+                timeout=10_000,
+            )
+        except Exception:
+            await asyncio.sleep(3)  # fallback if selector never appears
 
         filled_email = await _find_and_fill(page, _EMAIL_SELECTORS, creds["email"])
+        if not filled_email:
+            # Log the first few visible inputs to help diagnose selector mismatches
+            visible_inputs = await page.eval_on_selector_all(
+                "input",
+                "els => els.filter(e => e.offsetParent !== null).map(e => "
+                "({type: e.type, name: e.name, placeholder: e.placeholder, autocomplete: e.autocomplete}))"
+            )
+            print(f"DEBUG visible inputs on page: {visible_inputs}")
+
         filled_password = await _find_and_fill(page, _PASSWORD_SELECTORS, creds["password"])
 
         if filled_email and filled_password:
