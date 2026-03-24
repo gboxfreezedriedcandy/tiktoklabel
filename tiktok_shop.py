@@ -1000,6 +1000,17 @@ async def navigate_to_awaiting_shipment(
     else:
         print("No combine orders modal appeared. Proceeding normally.")
 
+    # Single-order path: drawer opens instead of navigating to a new shipment page.
+    if await _check_single_order_drawer(page):
+        await _set_drawer_weight(page, weight)
+        await _print_document(page)
+        if do_print:
+            await _click_buy_and_print(page, sku)
+        else:
+            print("Skipping 'Arrange shipment+print' (--print no).")
+        return
+
+    # Multi-order path: new shipment page loads.
     await _wait_for_shipment_page_and_select_all(page)
     if mode != "mixed-orders":
         await _click_bulk_select_all_if_present(page)
@@ -1042,6 +1053,38 @@ async def _click_arrange_shipment_button(page: Page) -> None:
         "Could not find the 'Arrange shipment' button. "
         f"Screenshot saved to '{screenshot_path}'."
     )
+
+
+async def _check_single_order_drawer(page: Page) -> bool:
+    """Return True if the single-order 'Arrange shipment' drawer is visible."""
+    try:
+        drawer = page.locator(
+            "[data-log_module_name='single_create_shipping_label_drawer_edit']"
+        ).first
+        await drawer.wait_for(state="visible", timeout=5_000)
+        print("Single-order drawer detected.")
+        return True
+    except Exception:
+        return False
+
+
+async def _set_drawer_weight(page: Page, weight: float | None) -> None:
+    """Set the package weight in the single-order arrange-shipment drawer."""
+    if weight is None:
+        return
+    input_selector = "input[data-id='fulfillment.create_shipping_label.input.package_weight']"
+    try:
+        inp = page.locator(input_selector).first
+        await inp.wait_for(state="visible", timeout=10_000)
+        await inp.click()
+        await asyncio.sleep(0.2)
+        await inp.evaluate("el => el.select()")
+        await asyncio.sleep(0.1)
+        await page.keyboard.type(str(weight), delay=100)
+        actual = await inp.input_value()
+        print(f"Drawer weight set to: {actual!r}")
+    except Exception as e:
+        print(f"Warning: could not set drawer weight: {e}")
 
 
 SHIPMENT_PAGE_SELECT_ALL_SELECTORS = [
