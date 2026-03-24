@@ -1674,6 +1674,8 @@ async def main():
                         help="Account name to use for login (determines which cookies file to load, e.g. 'foo' → cookies_foo.json)")
     parser.add_argument("--print", default="no", choices=["yes", "no"], dest="do_print",
                         help="Whether to click 'Arrange shipment+print' (default: no)")
+    parser.add_argument("--bot", default="no", choices=["yes", "no"],
+                        help="Bot mode: 'yes' closes browser automatically, 'no' waits for Enter (default: no)")
     parser.add_argument("--set-credentials", action="store_true", dest="set_credentials",
                         help="Securely store email/password for --account and exit")
     args = parser.parse_args()
@@ -1709,7 +1711,10 @@ async def main():
         order_ids = await get_awaiting_shipment_order_ids(page)
         print("Order IDs:", order_ids)
 
-        input("Press Enter to close the browser...")
+        if args.bot == "yes":
+            print("Bot mode: closing browser.")
+        else:
+            input("Press Enter to close the browser...")
         await browser.close()
 
 
