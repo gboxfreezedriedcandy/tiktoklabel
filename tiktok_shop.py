@@ -2,12 +2,71 @@ import argparse
 import base64
 import json
 import asyncio
+import os
+import re
+import stat
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
 
 TIKTOK_SHOP_URL = "https://seller-us.tiktok.com/account/login"
+CREDENTIALS_FILE = Path("credentials.json")
+
+# Login form selectors (tried in order).
+# TikTok Shop's email/phone field is type="text" with placeholder
+# "Email or phone number", so we include broad text-input fallbacks.
+_EMAIL_SELECTORS = [
+    'input[name="email"]',
+    'input[type="email"]',
+    'input[placeholder*="email" i]',
+    'input[placeholder*="phone" i]',
+    'input[placeholder*="account" i]',
+    'input[autocomplete="username"]',
+    'input[autocomplete="email"]',
+    # Broad fallback: first visible text input on the page (should be the
+    # email/phone field since the password input is type="password")
+    'input[type="text"]',
+]
+_PASSWORD_SELECTORS = [
+    'input[name="password"]',
+    'input[type="password"]',
+]
+_SUBMIT_SELECTORS = [
+    'button[type="submit"]',
+    'button:has-text("Log in")',
+    'button:has-text("Sign in")',
+    'button:has-text("Login")',
+]
+
+
+def load_credentials(account: str = "default") -> Optional[dict]:
+    """Return {'email': ..., 'password': ...} for *account*, or None if not found."""
+    if not CREDENTIALS_FILE.exists():
+        return None
+    try:
+        data = json.loads(CREDENTIALS_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get(account)
+
+
+def save_credentials(account: str, email: str, password: str) -> None:
+    """Persist credentials for *account* to credentials.json with mode 600."""
+    data: dict = {}
+    if CREDENTIALS_FILE.exists():
+        try:
+            data = json.loads(CREDENTIALS_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data[account] = {"email": email, "password": password}
+    CREDENTIALS_FILE.write_text(json.dumps(data, indent=2))
+    # Restrict to owner read/write only (no effect on Windows, fine on macOS/Linux)
+    try:
+        os.chmod(CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
 
 
 def _cookies_file(account: str) -> Path:
@@ -16,21 +75,39 @@ def _cookies_file(account: str) -> Path:
     return Path(f"cookies_{account}.json")
 
 
+_TIKTOK_DOMAINS = ("tiktok.com", "seller-us.tiktok.com", "tiktokglobalshop.com")
+
+
+def _is_tiktok_cookie(c: dict) -> bool:
+    domain = c.get("domain", "")
+    return any(domain == d or domain.endswith("." + d) for d in _TIKTOK_DOMAINS)
+
+
 async def save_cookies(context: BrowserContext, account: str = "default") -> None:
     path = _cookies_file(account)
-    cookies = await context.cookies()
-    path.write_text(json.dumps(cookies, indent=2))
-    print(f"Saved {len(cookies)} cookies to {path}")
+    all_cookies = await context.cookies()
+    # Keep only TikTok-domain cookies to avoid bloating the file with
+    # third-party tracker / CDN cookies that don't affect authentication.
+    session_cookies = [c for c in all_cookies if _is_tiktok_cookie(c)]
+    path.write_text(json.dumps(session_cookies, indent=2))
+    print(f"Saved {len(session_cookies)} TikTok cookies to {path} "
+          f"(filtered {len(all_cookies) - len(session_cookies)} unrelated cookies)")
 
 
 async def load_cookies(context: BrowserContext, account: str = "default") -> bool:
-    """Load cookies from file into context. Returns True if cookies were loaded."""
+    """Load non-expired cookies from file into context. Returns True if any were loaded."""
     path = _cookies_file(account)
     if not path.exists():
         return False
+    now = time.time()
     cookies = json.loads(path.read_text())
-    await context.add_cookies(cookies)
-    print(f"Loaded {len(cookies)} cookies from {path}")
+    # Drop cookies that have already expired (expires == -1 means session cookie, keep those)
+    valid = [c for c in cookies if c.get("expires", -1) == -1 or c["expires"] > now]
+    if not valid:
+        return False
+    await context.add_cookies(valid)
+    print(f"Loaded {len(valid)} cookies from {path} "
+          f"({len(cookies) - len(valid)} expired cookies skipped)")
     return True
 
 
@@ -69,8 +146,25 @@ async def wait_for_captcha_if_present(page: Page) -> None:
             continue
 
 
+async def _find_and_fill(page: Page, selectors: list[str], value: str) -> bool:
+    """Try each selector in order; fill the first visible one. Returns True on success."""
+    for sel in selectors:
+        try:
+            el = await page.query_selector(sel)
+            if el and await el.is_visible():
+                await el.fill(value)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def login(playwright, account: str = "default") -> None:
-    """Open browser for manual login, then save session cookies."""
+    """Open browser for login, then save session cookies.
+
+    If credentials.json contains an entry for *account*, the email and password
+    are filled in automatically.  Otherwise the user must log in manually.
+    """
     browser = await playwright.chromium.launch(headless=False)
     context = await browser.new_context()
     page = await context.new_page()
@@ -79,7 +173,48 @@ async def login(playwright, account: str = "default") -> None:
     await page.goto(TIKTOK_SHOP_URL)
     await wait_for_captcha_if_present(page)
 
-    print("Please log in manually in the browser window.")
+    creds = load_credentials(account)
+    if creds:
+        print(f"Credentials found for account '{account}'. Attempting auto-login...")
+        # Wait for any text/email input to appear before trying to fill.
+        # This handles JS-rendered forms that aren't present immediately.
+        try:
+            await page.wait_for_selector(
+                'input[type="text"], input[type="email"]',
+                state="visible",
+                timeout=10_000,
+            )
+        except Exception:
+            await asyncio.sleep(3)  # fallback if selector never appears
+
+        filled_email = await _find_and_fill(page, _EMAIL_SELECTORS, creds["email"])
+        if not filled_email:
+            # Log the first few visible inputs to help diagnose selector mismatches
+            visible_inputs = await page.eval_on_selector_all(
+                "input",
+                "els => els.filter(e => e.offsetParent !== null).map(e => "
+                "({type: e.type, name: e.name, placeholder: e.placeholder, autocomplete: e.autocomplete}))"
+            )
+            print(f"DEBUG visible inputs on page: {visible_inputs}")
+
+        filled_password = await _find_and_fill(page, _PASSWORD_SELECTORS, creds["password"])
+
+        if filled_email and filled_password:
+            # Try to submit the form
+            for sel in _SUBMIT_SELECTORS:
+                try:
+                    el = await page.query_selector(sel)
+                    if el and await el.is_visible():
+                        await el.click()
+                        break
+                except Exception:
+                    continue
+            print("Credentials submitted. Waiting for dashboard...")
+        else:
+            print("Could not locate login fields — please complete login manually.")
+    else:
+        print("Please log in manually in the browser window.")
+
     print("Waiting for you to reach the seller dashboard...")
 
     # Wait until the URL changes away from the login page; no hard timeout so
@@ -116,8 +251,21 @@ async def get_authenticated_context(playwright, account: str = "default") -> tup
     page = await context.new_page()
 
     print("Resuming session with saved cookies...")
-    await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
-    await asyncio.sleep(2)
+    try:
+        await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+    except Exception as e:
+        await browser.close()
+        if "ERR_ADDRESS_UNREACHABLE" in str(e) or "ERR_INTERNET_DISCONNECTED" in str(e) or "ERR_NAME_NOT_RESOLVED" in str(e):
+            raise RuntimeError(
+                f"Cannot reach {TIKTOK_SHOP_URL}. Check your internet connection and try again."
+            ) from e
+        raise
+    # Wait up to 8s for TikTok's JS to finish redirecting before deciding
+    # whether the session is still valid (a fixed 2s sleep was too short).
+    for _ in range(8):
+        if "login" not in page.url and "passport" not in page.url:
+            break
+        await asyncio.sleep(1)
 
     # Check whether cookies are still valid
     if "login" in page.url or "passport" in page.url:
@@ -129,14 +277,31 @@ async def get_authenticated_context(playwright, account: str = "default") -> tup
         context = await browser.new_context()
         await load_cookies(context, account)
         page = await context.new_page()
-        await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+        try:
+            await page.goto(TIKTOK_SHOP_URL, wait_until="domcontentloaded")
+        except Exception as e:
+            await browser.close()
+            if "ERR_ADDRESS_UNREACHABLE" in str(e) or "ERR_INTERNET_DISCONNECTED" in str(e) or "ERR_NAME_NOT_RESOLVED" in str(e):
+                raise RuntimeError(
+                    f"Cannot reach {TIKTOK_SHOP_URL}. Check your internet connection and try again."
+                ) from e
+            raise
         await asyncio.sleep(2)
 
     return browser, context, page
 
 
 async def _try_cookies_exist(account: str = "default") -> bool:
-    return _cookies_file(account).exists()
+    """Return True only if the cookies file exists and has at least one non-expired cookie."""
+    path = _cookies_file(account)
+    if not path.exists():
+        return False
+    try:
+        now = time.time()
+        cookies = json.loads(path.read_text())
+        return any(c.get("expires", -1) == -1 or c["expires"] > now for c in cookies)
+    except (json.JSONDecodeError, OSError):
+        return False
 
 
 ORDERS_URL = "https://seller-us.tiktok.com/order"
@@ -587,7 +752,27 @@ async def _apply_product_filter(
 
 
 def _is_checked(cls: str, aria: str | None) -> bool:
-    return "checked" in cls.lower() or (aria or "").lower() == "true"
+    # Use a negative lookbehind to avoid false-positives on class names that
+    # contain "unchecked" (e.g. "core-checkbox--unchecked").
+    class_checked = bool(re.search(r'(?<!un)checked', cls.lower()))
+    return class_checked or (aria or "").lower() == "true"
+
+
+async def _orders_are_selected(page: Page) -> bool:
+    """Return True if the 'N orders on this page are selected' banner is visible."""
+    selectors = [
+        "text=/\\d+ orders? on this page are selected/i",
+        "[class*='select-info']",
+        "[class*='selection-info']",
+        "[class*='selected-tip']",
+    ]
+    for sel in selectors:
+        try:
+            if await page.locator(sel).first.is_visible(timeout=800):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 async def _click_select_all_checkbox(page: Page) -> None:
@@ -695,7 +880,9 @@ async def _click_select_all_checkbox(page: Page) -> None:
         except Exception:
             continue
         await asyncio.sleep(0.4)
-        if await is_now_checked():
+        # Both the DOM attribute AND the selection banner must confirm success
+        # to avoid false-positives from class names like 'core-checkbox--unchecked'.
+        if await is_now_checked() and await _orders_are_selected(page):
             print(f"Select-all checkbox checked via: {name}")
             return
 
@@ -1028,7 +1215,13 @@ async def navigate_to_awaiting_shipment(
 ARRANGE_SHIPMENT_SELECTORS = [
     "button[data-id='fulfillment.manage_order.batch_arrange_shipment']",
     "button[data-log_click_for='arrange_shipment']",
+    # Playwright :has-text works regardless of nesting depth
+    "button:has-text('Arrange shipment')",
+    "[role='button']:has-text('Arrange shipment')",
+    # XPath fallback
     "//button[.//span[contains(normalize-space(),'Arrange shipment')]]",
+    "//button[contains(normalize-space(),'Arrange shipment')]",
+    "//*[@role='button' and contains(normalize-space(),'Arrange shipment')]",
 ]
 
 
@@ -1036,19 +1229,43 @@ async def _click_arrange_shipment_button(page: Page) -> None:
     """
     Wait for the 'Arrange shipment' button to appear (it only shows after rows
     are selected) then click it.
+
+    TikTok renders this button in a fixed bottom action bar, so we scroll to
+    the bottom first to ensure it is in the viewport before looking for it.
     """
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await asyncio.sleep(0.5)
+
     for selector in ARRANGE_SHIPMENT_SELECTORS:
         try:
             locator = page.locator(selector).first
             await locator.wait_for(state="visible", timeout=10_000)
+            await locator.scroll_into_view_if_needed()
             await locator.click()
             print("'Arrange shipment' button clicked.")
             return
         except Exception:
             continue
 
+    # JS fallback: find any visible button/div whose text includes the phrase
+    clicked = await page.evaluate("""() => {
+        const phrase = 'Arrange shipment';
+        const candidates = [...document.querySelectorAll('button, [role="button"], a')];
+        for (const el of candidates) {
+            if (el.offsetParent !== null && el.textContent.includes(phrase)) {
+                el.click();
+                return true;
+            }
+        }
+        return false;
+    }""")
+    if clicked:
+        print("'Arrange shipment' button clicked via JS fallback.")
+        return
+
     screenshot_path = Path("debug_arrange_shipment.png")
-    await page.screenshot(path=str(screenshot_path), full_page=True)
+    # Use full_page=False so fixed/sticky bars are captured at their viewport position
+    await page.screenshot(path=str(screenshot_path), full_page=False)
     raise RuntimeError(
         "Could not find the 'Arrange shipment' button. "
         f"Screenshot saved to '{screenshot_path}'."
@@ -1285,31 +1502,53 @@ async def scan_order_skus(page: Page) -> None:
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
 
-        # Close the product popover by clicking the trigger cell again (toggle),
+        # Close the product popover by clicking a neutral area (table header),
         # then wait for it to disappear before interacting with the weight cell.
         try:
-            await trigger.click()
+            await page.locator("table thead th").first.click()
             await popover.wait_for(state="hidden", timeout=2_000)
         except Exception:
             pass
+        await asyncio.sleep(0.8)  # let close animation fully settle
 
-        # Click the weight edit icon scoped to this row (avoids hitting another row's icon).
+        # Locate the weight cell in this row and click it directly to open the
+        # weight popover. Clicking the cell is more reliable than trying to hit
+        # the small edit icon that appears on hover.
+        weight_cell_selectors = [
+            "[data-log_click_for='cell_package_weight']",
+            "[data-log_click_for='cell_weight']",
+            "td[class*='weight']",
+        ]
+        weight_cell = None
+        for wcs in weight_cell_selectors:
+            candidate = row.locator(wcs).first
+            if await candidate.count() > 0:
+                weight_cell = candidate
+                break
+
+        if weight_cell is None:
+            # Fallback: last table cell in the row tends to be the weight column
+            weight_cell = row.locator("td").last
+
         weight_popover = page.locator("[data-log_module_name='package_weight_edit_popover']").first
-        edit_icon = row.locator("svg.theme-arco-icon-edit").first
 
         weight_opened = False
-        try:
-            await edit_icon.click(force=True)
-            await weight_popover.wait_for(state="visible", timeout=800)
-            weight_opened = True
-        except Exception:
-            # one retry with a longer window
+        for attempt in range(4):
             try:
-                await edit_icon.click(force=True)
-                await weight_popover.wait_for(state="visible", timeout=1_500)
+                await weight_cell.scroll_into_view_if_needed()
+                await weight_cell.click()
+                await weight_popover.wait_for(state="visible", timeout=2_000)
                 weight_opened = True
+                break
             except Exception:
-                pass
+                wait_s = 0.5 * (attempt + 1)
+                print(f"  Row {i + 1}: weight popover not visible (attempt {attempt + 1}), waiting {wait_s}s...")
+                # Click a neutral area to dismiss anything that might be blocking.
+                try:
+                    await page.locator("table thead th").first.click()
+                except Exception:
+                    pass
+                await asyncio.sleep(wait_s)
 
         if not weight_opened:
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
@@ -1345,20 +1584,36 @@ async def scan_order_skus(page: Page) -> None:
         total_weight += extra_weight
 
         weight_str = str(round(total_weight, 5)).rstrip("0").rstrip(".")
+        print(f"  Row {i + 1}: total weight to enter = {weight_str} kg  (skus={order_skus}, extra={extra_weight})")
 
         # Set the weight using key-event approach (fill()/JS setter don't trigger v-model).
         weight_input = weight_popover.locator("input#packageWeight_input").first
-        try:
-            await weight_input.wait_for(state="visible", timeout=5_000)
-            await weight_input.click()
-            await asyncio.sleep(0.2)
-            await weight_input.evaluate("el => el.select()")
-            await asyncio.sleep(0.1)
-            await page.keyboard.type(weight_str, delay=50)
-            actual = await weight_input.input_value()
-            print(f"  Row {i + 1}: weight set to {actual!r} (computed {weight_str} from {order_skus})")
-        except Exception as e:
-            print(f"  Row {i + 1}: warning — could not set weight: {e}")
+        input_ok = False
+        for input_attempt in range(3):
+            try:
+                await weight_input.wait_for(state="visible", timeout=5_000)
+                await weight_input.click()
+                await asyncio.sleep(0.2)
+                # Select-all then type to replace any existing value.
+                await weight_input.evaluate("el => { el.select(); }")
+                await asyncio.sleep(0.1)
+                await page.keyboard.type(weight_str, delay=50)
+                actual = await weight_input.input_value()
+                print(f"  Row {i + 1}: input value after typing = {actual!r} (expected {weight_str!r})")
+                if actual.strip() == weight_str:
+                    input_ok = True
+                    break
+                # Value doesn't match — clear and retry.
+                print(f"  Row {i + 1}: mismatch on attempt {input_attempt + 1}, retrying...")
+                await weight_input.evaluate("el => { el.value = ''; el.select(); }")
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                print(f"  Row {i + 1}: warning — could not set weight (attempt {input_attempt + 1}): {e}")
+                await asyncio.sleep(0.3)
+
+        if not input_ok:
+            print(f"  Row {i + 1}: ERROR — weight input did not match after 3 attempts; skipping row.")
+            await weight_input.press("Escape")
             continue
 
         # Confirm the value (Enter closes/saves the inline popover).
@@ -1367,6 +1622,13 @@ async def scan_order_skus(page: Page) -> None:
             await weight_popover.wait_for(state="hidden", timeout=3_000)
         except Exception:
             await asyncio.sleep(0.5)
+
+        # Verify the cell now shows the correct weight after saving.
+        try:
+            cell_text = (await weight_cell.inner_text()).strip()
+            print(f"  Row {i + 1}: cell shows {cell_text!r} after save (expected {weight_str})")
+        except Exception:
+            pass
 
     print("\n=== SKUs found ===")
     for idx, order_skus in enumerate(skus, 1):
@@ -1412,7 +1674,17 @@ async def main():
                         help="Account name to use for login (determines which cookies file to load, e.g. 'foo' → cookies_foo.json)")
     parser.add_argument("--print", default="no", choices=["yes", "no"], dest="do_print",
                         help="Whether to click 'Arrange shipment+print' (default: no)")
+    parser.add_argument("--set-credentials", action="store_true", dest="set_credentials",
+                        help="Securely store email/password for --account and exit")
     args = parser.parse_args()
+
+    if args.set_credentials:
+        import getpass
+        email = input(f"Email for account '{args.account}': ").strip()
+        password = getpass.getpass(f"Password for account '{args.account}': ")
+        save_credentials(args.account, email, password)
+        print(f"Credentials saved for account '{args.account}' in {CREDENTIALS_FILE} (mode 600).")
+        return
 
     async with async_playwright() as playwright:
         browser, context, page = await get_authenticated_context(playwright, args.account)
