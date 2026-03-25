@@ -1187,6 +1187,16 @@ async def navigate_to_awaiting_shipment(
     except Exception:
         print("No orders found after filtering. Nothing to do.")
         return
+
+    # Guard: the empty state still renders a tbody row. Check the "Found 0 orders"
+    # indicator in the filter bar before attempting to select anything.
+    try:
+        if await page.locator("text='Found 0 orders'").first.is_visible(timeout=2_000):
+            print("No orders found after filtering. Nothing to do.")
+            return
+    except Exception:
+        pass
+
     print("Filtered rows visible.")
 
     await _click_select_all_checkbox(page)
