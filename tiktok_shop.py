@@ -6,7 +6,7 @@ import os
 import re
 import stat
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 from playwright.async_api import async_playwright, BrowserContext, Locator, Page
@@ -1073,7 +1073,7 @@ async def _print_document(page: Page) -> None:
         print(f"Warning: could not click Confirm on print settings: {e}")
 
 
-async def _click_buy_and_print(page: Page, sku: str, translate: bool = False) -> None:
+async def _click_buy_and_print(page: Page, sku: str, translate: bool = False, mode: str = "single-order") -> None:
     """Click the 'Arrange shipment+print' button, wait for the PDF tab, and save it."""
     btn = page.locator("[data-id='fulfillment.create_shipping_label.buy_and_print_label']").first
     try:
@@ -1085,7 +1085,11 @@ async def _click_buy_and_print(page: Page, sku: str, translate: bool = False) ->
         await pdf_page.wait_for_load_state("load", timeout=30_000)
         pdf_url = pdf_page.url
         print(f"PDF tab opened: {pdf_url}")
-        filename = f"{sku}_{date.today().strftime('%Y%m%d')}.pdf"
+        now = datetime.now()
+        if mode == "mixed-orders":
+            filename = f"mix_orders_{now.strftime('%H%M%S')}_{now.strftime('%Y%m%d')}.pdf"
+        else:
+            filename = f"{sku}_{now.strftime('%Y%m%d')}.pdf"
         if pdf_url.startswith("blob:"):
             b64: str = await pdf_page.evaluate("""async (url) => {
                 const resp = await fetch(url);
@@ -1215,7 +1219,7 @@ async def navigate_to_awaiting_shipment(
         await _set_drawer_weight(page, weight)
         await _print_document(page)
         if do_print:
-            await _click_buy_and_print(page, sku, translate=translate)
+            await _click_buy_and_print(page, sku, translate=translate, mode=mode)
         else:
             print("Skipping 'Arrange shipment+print' (--print no).")
         return
@@ -1230,7 +1234,7 @@ async def navigate_to_awaiting_shipment(
         await _batch_edit_weight(page, weight)
     await _print_document(page)
     if do_print:
-        await _click_buy_and_print(page, sku, translate=translate)
+        await _click_buy_and_print(page, sku, translate=translate, mode=mode)
     else:
         print("Skipping 'Arrange shipment+print' (--print no).")
 
