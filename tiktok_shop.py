@@ -1485,7 +1485,7 @@ async def scan_order_skus(page: Page) -> None:
         trigger = row.locator("[data-log_click_for='cell_product']").first
         try:
             await trigger.scroll_into_view_if_needed()
-            await trigger.click()
+            await trigger.click(timeout=5_000)
         except Exception as e:
             print(f"Row {i}: could not click product cell: {e}")
             skus.append([("(click failed)", "")])
@@ -1527,7 +1527,7 @@ async def scan_order_skus(page: Page) -> None:
 
         # Close the product popover by clicking the trigger cell again (toggles it closed).
         try:
-            await trigger.click()
+            await trigger.click(timeout=3_000)
             await popover.wait_for(state="hidden", timeout=2_000)
         except Exception:
             pass
@@ -1558,21 +1558,29 @@ async def scan_order_skus(page: Page) -> None:
         for attempt in range(4):
             try:
                 await weight_cell.scroll_into_view_if_needed()
-                await weight_cell.click()
+                await weight_cell.click(force=True)
                 await weight_popover.wait_for(state="visible", timeout=2_000)
                 weight_opened = True
                 break
             except Exception:
                 wait_s = 0.5 * (attempt + 1)
                 print(f"  Row {i + 1}: weight popover not visible (attempt {attempt + 1}), waiting {wait_s}s...")
-                # Click the product cell again to dismiss anything that might be blocking.
+                # Only close the product popover if it is currently open — avoid toggle desync.
                 try:
-                    await trigger.click()
+                    if await popover.is_visible():
+                        await trigger.click(timeout=3_000)
+                        await popover.wait_for(state="hidden", timeout=1_000)
                 except Exception:
                     pass
                 await asyncio.sleep(wait_s)
 
         if not weight_opened:
+            # Clean up any open popover before moving to the next row.
+            try:
+                if await popover.is_visible():
+                    await trigger.click(timeout=3_000)
+            except Exception:
+                pass
             print(f"  Row {i + 1}: warning — weight popover did not appear; skipping weight set.")
             continue
 
