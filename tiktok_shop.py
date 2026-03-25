@@ -1073,7 +1073,7 @@ async def _print_document(page: Page) -> None:
         print(f"Warning: could not click Confirm on print settings: {e}")
 
 
-async def _click_buy_and_print(page: Page, sku: str) -> None:
+async def _click_buy_and_print(page: Page, sku: str, translate: bool = False) -> None:
     """Click the 'Arrange shipment+print' button, wait for the PDF tab, and save it."""
     btn = page.locator("[data-id='fulfillment.create_shipping_label.buy_and_print_label']").first
     try:
@@ -1105,6 +1105,18 @@ async def _click_buy_and_print(page: Page, sku: str) -> None:
         Path(filename).write_bytes(pdf_bytes)
         print(f"Saved PDF as '{filename}'.")
         await pdf_page.close()
+        if translate:
+            import subprocess, sys
+            translated = str(Path(filename).with_stem(Path(filename).stem + "_translated"))
+            print(f"Translating PDF to '{translated}'...")
+            result = subprocess.run(
+                [sys.executable, "pdf_replace_text.py", filename, translated],
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                print(f"Translated PDF saved as '{translated}'.")
+            else:
+                print(f"Warning: translation failed:\n{result.stderr}")
     except Exception as e:
         print(f"Warning: could not click 'Arrange shipment+print' or save PDF: {e}")
 
@@ -1149,6 +1161,7 @@ async def navigate_to_awaiting_shipment(
     weight: float | None = None,
     mode: str = "single-order",
     do_print: bool = True,
+    translate: bool = False,
 ) -> None:
     """
     Navigate to Manage Orders and filter to 'Awaiting shipment' orders.
@@ -1192,7 +1205,7 @@ async def navigate_to_awaiting_shipment(
         await _set_drawer_weight(page, weight)
         await _print_document(page)
         if do_print:
-            await _click_buy_and_print(page, sku)
+            await _click_buy_and_print(page, sku, translate=translate)
         else:
             print("Skipping 'Arrange shipment+print' (--print no).")
         return
@@ -1207,7 +1220,7 @@ async def navigate_to_awaiting_shipment(
         await _batch_edit_weight(page, weight)
     await _print_document(page)
     if do_print:
-        await _click_buy_and_print(page, sku)
+        await _click_buy_and_print(page, sku, translate=translate)
     else:
         print("Skipping 'Arrange shipment+print' (--print no).")
 
@@ -1676,6 +1689,8 @@ async def main():
                         help="Whether to click 'Arrange shipment+print' (default: no)")
     parser.add_argument("--bot", default="no", choices=["yes", "no"],
                         help="Bot mode: 'yes' closes browser automatically, 'no' waits for Enter (default: no)")
+    parser.add_argument("--translate", default="no", choices=["yes", "no"],
+                        help="Run pdf_replace_text.py on the downloaded PDF and save as <name>_translated.pdf (default: no)")
     parser.add_argument("--set-credentials", action="store_true", dest="set_credentials",
                         help="Securely store email/password for --account and exit")
     args = parser.parse_args()
@@ -1705,6 +1720,7 @@ async def main():
                 weight=args.weight,
                 mode=args.mode,
                 do_print=args.do_print == "yes",
+                translate=args.translate == "yes",
             )
         await save_cookies(context, args.account)
         print("Session cookies refreshed and saved.")
