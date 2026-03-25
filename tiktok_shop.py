@@ -1525,10 +1525,9 @@ async def scan_order_skus(page: Page) -> None:
 
         print(f"  Row {i + 1}: {', '.join(f'{sku} x{qty}' for sku, qty in order_skus)}")
 
-        # Close the product popover by clicking a neutral area (table header),
-        # then wait for it to disappear before interacting with the weight cell.
+        # Close the product popover by clicking the trigger cell again (toggles it closed).
         try:
-            await page.locator("table thead th").first.click()
+            await trigger.click()
             await popover.wait_for(state="hidden", timeout=2_000)
         except Exception:
             pass
@@ -1566,9 +1565,9 @@ async def scan_order_skus(page: Page) -> None:
             except Exception:
                 wait_s = 0.5 * (attempt + 1)
                 print(f"  Row {i + 1}: weight popover not visible (attempt {attempt + 1}), waiting {wait_s}s...")
-                # Click a neutral area to dismiss anything that might be blocking.
+                # Click the product cell again to dismiss anything that might be blocking.
                 try:
-                    await page.locator("table thead th").first.click()
+                    await trigger.click()
                 except Exception:
                     pass
                 await asyncio.sleep(wait_s)
