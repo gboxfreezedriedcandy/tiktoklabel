@@ -1206,6 +1206,10 @@ async def navigate_to_awaiting_shipment(
     await _click_select_all_checkbox(page)
     if mode != "mixed-orders":
         await _click_bulk_select_all_if_present(page)
+
+    # Capture URL before clicking so we can detect navigation afterwards.
+    url_before = page.url
+
     await _click_arrange_shipment_button(page)
 
     combined = await handle_combine_orders_modal(page, timeout=15.0)
@@ -1214,8 +1218,17 @@ async def navigate_to_awaiting_shipment(
     else:
         print("No combine orders modal appeared. Proceeding normally.")
 
-    # Single-order path: drawer opens instead of navigating to a new shipment page.
-    if await _check_single_order_drawer(page):
+    # Detect path by URL change, not by drawer element presence.
+    # URL unchanged → no navigation → single-order drawer.
+    # URL changed   → TikTok navigated to shipment page → multi-order path.
+    url_after = page.url
+    print(f"URL before arrange: {url_before!r}")
+    print(f"URL after arrange:  {url_after!r}")
+
+    if url_after == url_before:
+        # Secondary confirmation: drawer should be present.
+        if not await _check_single_order_drawer(page):
+            print("Warning: URL unchanged but single-order drawer not found. Proceeding anyway.")
         await _set_drawer_weight(page, weight)
         await _print_document(page)
         if do_print:
@@ -1224,7 +1237,7 @@ async def navigate_to_awaiting_shipment(
             print("Skipping 'Arrange shipment+print' (--print no).")
         return
 
-    # Multi-order path: new shipment page loads.
+    # Multi-order path: new shipment page loaded (URL changed).
     await _wait_for_shipment_page_and_select_all(page)
     if mode != "mixed-orders":
         await _click_bulk_select_all_if_present(page)
