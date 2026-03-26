@@ -1089,7 +1089,7 @@ async def _click_buy_and_print(page: Page, sku: str, translate: bool = False, mo
         if mode == "mixed-orders":
             filename = f"mix_orders_{now.strftime('%H%M%S')}_{now.strftime('%Y%m%d')}.pdf"
         else:
-            filename = f"{sku}_{now.strftime('%Y%m%d')}.pdf"
+            filename = f"{sku}_{now.strftime('%H%M%S')}_{now.strftime('%Y%m%d')}.pdf"
         if pdf_url.startswith("blob:"):
             b64: str = await pdf_page.evaluate("""async (url) => {
                 const resp = await fetch(url);
